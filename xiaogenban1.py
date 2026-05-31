@@ -50,7 +50,6 @@ def init_db():
                  (user_id INTEGER PRIMARY KEY, username TEXT, expire_time TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS dynamic_masters
                  (user_id INTEGER PRIMARY KEY, username TEXT, added_by INTEGER)''')
-    # 偷偷缓存群内成员 @用户名 与 UID 的映射表
     c.execute('''CREATE TABLE IF NOT EXISTS user_caches
                  (username_lower TEXT PRIMARY KEY, user_id INTEGER, display_name TEXT)''')
     conn.commit()
@@ -174,7 +173,7 @@ def update_setting(group_id, key, value):
 def add_bill(group_id, user_id, username, remark, amount, bill_type, exchange_rate=None):
     if exchange_rate is None:
         exchange_rate = get_setting(group_id, 'exchange_rate') or 7.2
-    
+    
     if bill_type == 'income':
         usdt_amount = amount / exchange_rate
     else:
@@ -186,7 +185,7 @@ def add_bill(group_id, user_id, username, remark, amount, bill_type, exchange_ra
 
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''INSERT INTO bills 
+    c.execute('''INSERT INTO bills 
                  (group_id, user_id, username, remark, amount, usdt_amount, exchange_rate, bill_type, timestamp, date_str, is_settled)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)''',
               (group_id, user_id, username, remark, amount, usdt_amount, exchange_rate, bill_type, full_time, date_str))
@@ -208,180 +207,135 @@ def get_class_bills_by_date(group_id, target_date):
     conn.close()
     return income, expense, total_income, total_expense
 
-# ==================== 网页端明细对账看板（像素级还原图三样式） ====================
+# ==================== 网页端明细对账看板（样式对齐） ====================
 @flask_app.route('/')
 def index():
-    return '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>实时课堂账单历史明细</title>
-        <style>
-            *{margin:0;padding:0;box-sizing:border-box;}
-            body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f3f4f9;padding:12px;color:#333;}
-            .container{max-width:800px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.06);overflow:hidden;}
-            
-            /* 还原顶栏紫色高级渐变 */
-            .header-banner {
-                background: linear-gradient(135deg, #5b62e7 0%, #8561ea 100%);
-                color: #fff;
-                padding: 22px 18px;
-                position: relative;
-            }
-            .header-banner h1 { font-size: 19px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-            .header-banner p { font-size: 12px; opacity: 0.85; margin-top: 5px; }
-            
-            /* 日期选择小挂件 */
-            .date-badge {
-                position: absolute; right: 15px; bottom: 18px;
-                background: rgba(255,255,255,0.23); padding: 5px 10px; border-radius: 8px;
-                display: flex; align-items: center; gap: 5px; font-size: 12px; border: 1px solid rgba(255,255,255,0.15);
-            }
-            .date-badge input { background: transparent; border: none; color: white; outline: none; font-size: 12px; cursor: pointer; font-weight: bold; }
-            
-            .main-content { padding: 16px; }
-            .table-title { font-size: 15px; font-weight: bold; color: #3c42be; margin: 15px 0 10px 0; display: flex; align-items: center; gap: 5px; border-bottom: 1px solid #eef0f6; padding-bottom: 8px; }
-            
-            /* 数据标准表格布局 */
-            .table-wrapper { width: 100%; overflow-x: auto; margin-bottom: 15px; border-radius: 8px; border: 1px solid #edf0f5; }
-            table { width: 100%; border-collapse: collapse; background: #fff; min-width: 500px; }
-            th, td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid #edf0f5; }
-            th { background: #f8f9fc; color: #6e758b; font-weight: 500; font-size: 12px; }
-            td { color: #444; }
-            
-            /* 还原图三：备注分类统计进度条样式 */
-            .cate-box { background: #fff; border: 1px solid #edf0f5; border-radius: 8px; padding: 12px; margin-bottom: 18px; }
-            .cate-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 6px 0; border-bottom: 1px dashed #f0f2f7; }
-            .cate-row:last-child { border-bottom: none; }
-            .cate-tag { font-weight: bold; color: #ff9800; display: flex; align-items: center; gap: 4px; }
-            .cate-val { font-size: 13px; font-weight: 600; color: #4b52be; }
-
-            /* 还原图三：下方灰白方块卡片矩阵 */
-            .grid-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 15px; }
-            .card { background: #f8f9fc; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #f0f2f7; }
-            .card-label { font-size: 11px; color: #8c93a6; margin-bottom: 5px; display: flex; align-items: center; justify-content: center; gap: 3px; }
-            .card-value { font-size: 16px; font-weight: bold; color: #2d3142; }
-            
-            .no-data { text-align: center; padding: 30px; color: #a0a7b5; font-size: 13px; background: #fafbfe; border-radius: 8px; }
-            .loading-shimmer { text-align: center; padding: 50px; color: #623ce4; font-size: 14px; font-weight: 500; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header-banner">
-                <h1>📋 实时课堂账单历史明细</h1>
-                <p>默认同步实时账单 · 数据每4秒自动更新</p>
-                <div class="date-badge">
-                    📅 <input type="date" id="targetDate" onchange="dateChanged()">
-                </div>
-            </div>
-            
-            <div class="main-content" id="viewShell">
-                <div class="loading-shimmer">正在安全对账通道拉取实时流数据...</div>
+    return '''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时课堂账单历史明细</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;}
+        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f3f4f9;padding:12px;color:#333;}
+        .container{max-width:800px;margin:0 auto;background:#fff;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.06);overflow:hidden;}
+        .header-banner {background: linear-gradient(135deg, #5b62e7 0%, #8561ea 100%); color: #fff; padding: 22px 18px; position: relative;}
+        .header-banner h1 { font-size: 19px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+        .header-banner p { font-size: 12px; opacity: 0.85; margin-top: 5px; }
+        .date-badge {position: absolute; right: 15px; bottom: 18px; background: rgba(255,255,255,0.23); padding: 5px 10px; border-radius: 8px; display: flex; align-items: center; gap: 5px; font-size: 12px; border: 1px solid rgba(255,255,255,0.15);}
+        .date-badge input { background: transparent; border: none; color: white; outline: none; font-size: 12px; cursor: pointer; font-weight: bold; }
+        .main-content { padding: 16px; }
+        .table-title { font-size: 15px; font-weight: bold; color: #3c42be; margin: 15px 0 10px 0; display: flex; align-items: center; gap: 5px; border-bottom: 1px solid #eef0f6; padding-bottom: 8px; }
+        .table-wrapper { width: 100%; overflow-x: auto; margin-bottom: 15px; border-radius: 8px; border: 1px solid #edf0f5; }
+        table { width: 100%; border-collapse: collapse; background: #fff; min-width: 500px; }
+        th, td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid #edf0f5; }
+        th { background: #f8f9fc; color: #6e758b; font-weight: 500; font-size: 12px; }
+        td { color: #444; }
+        .cate-box { background: #fff; border: 1px solid #edf0f5; border-radius: 8px; padding: 12px; margin-bottom: 18px; }
+        .cate-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 6px 0; border-bottom: 1px dashed #f0f2f7; }
+        .cate-row:last-child { border-bottom: none; }
+        .cate-tag { font-weight: bold; color: #ff9800; display: flex; align-items: center; gap: 4px; }
+        .cate-val { font-size: 13px; font-weight: 600; color: #4b52be; }
+        .grid-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 15px; }
+        .card { background: #f8f9fc; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid #f0f2f7; }
+        .card-label { font-size: 11px; color: #8c93a6; margin-bottom: 5px; display: flex; align-items: center; justify-content: center; gap: 3px; }
+        .card-value { font-size: 16px; font-weight: bold; color: #2d3142; }
+        .no-data { text-align: center; padding: 30px; color: #a0a7b5; font-size: 13px; background: #fafbfe; border-radius: 8px; }
+        .loading-shimmer { text-align: center; padding: 50px; color: #623ce4; font-size: 14px; font-weight: 500; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-banner">
+            <h1>📋 实时课堂账单历史明细</h1>
+            <p>默认同步实时账单 · 数据每4秒自动更新</p>
+            <div class="date-badge">
+                📅 <input type="date" id="targetDate" onchange="dateChanged()">
             </div>
         </div>
-
-        <script>
-            let gId = "";
-            let selectedDay = "";
-
-            function parseQuery() {
-                const urlParams = new URLSearchParams(window.location.search);
-                gId = urlParams.get('group_id');
-                if(!gId) {
-                    document.getElementById('viewShell').innerHTML = `<div class="no-data" style="color:red; font-weight:bold;">❌ 握手失败：未携带合法的对账凭证秘钥</div>`;
-                    return false;
+        <div class="main-content" id="viewShell">
+            <div class="loading-shimmer">正在安全对账通道拉取实时流数据...</div>
+        </div>
+    </div>
+    <script>
+        let gId = "";
+        let selectedDay = "";
+        function parseQuery() {
+            const urlParams = new URLSearchParams(window.location.search);
+            gId = urlParams.get('group_id');
+            if(!gId) {
+                document.getElementById('viewShell').innerHTML = `<div class="no-data" style="color:red; font-weight:bold;">❌ 握手失败：未携带合法的对账凭证秘钥</div>`;
+                return false;
+            }
+            const d = new Date();
+            let m = d.getMonth() + 1; let day = d.getDate();
+            selectedDay = `${d.getFullYear()}-${m<10?'0'+m:m}-${day<10?'0'+day:day}`;
+            document.getElementById('targetDate').value = selectedDay;
+            return true;
+        }
+        function dateChanged() {
+            selectedDay = document.getElementById('targetDate').value;
+            fetchData();
+        }
+        async function fetchData() {
+            if(!gId) return;
+            try {
+                const res = await fetch(`/api/bill?group_id=${gId}&date=${selectedDay}&_cache_burst=${new Date().getTime()}`);
+                const data = await res.json();
+                let html = "";
+                html += `<div class="table-title">📥 入款记录 (${data.income_bills.length} 笔)</div>`;
+                if(data.income_bills.length > 0) {
+                    html += `<div class="table-wrapper"><table><thead><tr><th>备注</th><th>时间</th><th>金额(元)</th><th>汇率</th><th>等值数量</th><th>操作人</th></tr></thead><tbody>`;
+                    data.income_bills.forEach(b => {
+                        html += `<tr><td><b>${b.remark}</b></td><td>${b.time}</td><td>${b.amount}</td><td>${b.exchange_rate}</td><td style="color:#2ecc71;font-weight:bold;">${b.usdt} USDT</td><td>${b.username}</td></tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                } else {
+                    html += `<div class="no-data">本日暂无任何入款账单流转</div>`;
                 }
-                const d = new Date();
-                let m = d.getMonth() + 1; let day = d.getDate();
-                selectedDay = `${d.getFullYear()}-${m<10?'0'+m:m}-${day<10?'0'+day:day}`;
-                document.getElementById('targetDate').value = selectedDay;
-                return true;
-            }
-
-            function dateChanged() {
-                selectedDay = document.getElementById('targetDate').value;
-                fetchData();
-            }
-
-            async function fetchData() {
-                if(!gId) return;
-                try {
-                    const res = await fetch(`/api/bill?group_id=${gId}&date=${selectedDay}&_cache_burst=${new Date().getTime()}`);
-                    const data = await res.json();
-                    
-                    let html = "";
-                    
-                    // 1. 入款记录表格
-                    html += `<div class="table-title">📥 入款记录 (${data.income_bills.length} 笔)</div>`;
-                    if(data.income_bills.length > 0) {
-                        html += `<div class="table-wrapper"><table>
-                            <thead><tr><th>备注</th><th>时间</th><th>金额(元)</th><th>汇率</th><th>等值数量</th><th>操作人</th></tr></thead><tbody>`;
-                        data.income_bills.forEach(b => {
-                            html += `<tr><td><b>${b.remark}</b></td><td>${b.time}</td><td>${b.amount}</td><td>${b.exchange_rate}</td><td style="color:#2ecc71;font-weight:bold;">${b.usdt} USDT</td><td>${b.username}</td></tr>`;
-                        });
-                        html += `</tbody></table></div>`;
-                    } else {
-                        html += `<div class="no-data">本日暂无任何入款账单流转</div>`;
+                if(data.summary_by_remark && Object.keys(data.summary_by_remark).length > 0) {
+                    html += `<div class="table-title">📊 备注分类统计</div><div class="cate-box">`;
+                    for(const [rem, val] of Object.entries(data.summary_by_remark)) {
+                        html += `<div class="cate-row"><span class="cate-tag">📝 ${rem}</span><span class="cate-val">${val.count}笔 | ${val.rmb}元 | ${val.usdt} USDT</span></div>`;
                     }
-
-                    // 2. 还原图三核心：备注分类统计
-                    if(data.summary_by_remark && Object.keys(data.summary_by_remark).length > 0) {
-                        html += `<div class="table-title">📊 备注分类统计</div><div class="cate-box">`;
-                        for(const [rem, val] of Object.entries(data.summary_by_remark)) {
-                            html += `<div class="cate-row">
-                                <span class="cate-tag">📝 ${rem}</span>
-                                <span class="cate-val">${val.count}笔 | ${val.rmb}元 | ${val.usdt} USDT</span>
-                            </div>`;
-                        }
-                        html += `</div>`;
-                    }
-
-                    // 3. 下发记录表格
-                    html += `<div class="table-title">📤 下发记录明细 (${data.expense_bills.length} 笔)</div>`;
-                    if(data.expense_bills.length > 0) {
-                        html += `<div class="table-wrapper"><table>
-                            <thead><tr><th>备注</th><th>时间</th><th>下发数量(USDT)</th><th>操作人</th></tr></thead><tbody>`;
-                        data.expense_bills.forEach(b => {
-                            html += `<tr><td><b>${b.remark}</b></td><td>${b.time}</td><td style="color:#e74c3c;font-weight:bold;">${b.usdt} USDT</td><td>${b.username}</td></tr>`;
-                        });
-                        html += `</tbody></table></div>`;
-                    } else {
-                        html += `<div class="no-data">本日暂无任何下发数据流转</div>`;
-                    }
-
-                    // 4. 还原图三底部小方块多网格卡片矩阵
-                    html += `
-                    <div class="grid-container">
-                        <div class="card"><div class="card-label">💰 费率</div><div class="card-value">${data.fee_rate}%</div></div>
-                        <div class="card"><div class="card-label">💱 汇率</div><div class="card-value" style="color:#4b52be;">${data.exchange_rate}</div></div>
-                        <div class="card"><div class="card-label">👤 总入款(元)</div><div class="card-value">${data.total_rmb}</div></div>
-                        <div class="card"><div class="card-label">💵 总入款数量</div><div class="card-value" style="color:#2ecc71;">${data.total_usdt} USDT</div></div>
-                        <div class="card"><div class="card-label">📤 已下发</div><div class="card-value" style="color:#e74c3c;">${data.expense_usdt} USDT</div></div>
-                        <div class="card"><div class="card-label">🏛️ 未下发</div><div class="card-value" style="color:#f39c12;">${data.remaining_usdt} USDT</div></div>
-                    </div>`;
-                    
-                    document.getElementById('viewShell').innerHTML = html;
-                } catch(e) {
-                    document.getElementById('viewShell').innerHTML = `<div class="no-data" style="color:red;">❌ 数据中继网关拥堵，正在自动重连...</div>`;
+                    html += `</div>`;
                 }
+                html += `<div class="table-title">📤 下发记录明细 (${data.expense_bills.length} 笔)</div>`;
+                if(data.expense_bills.length > 0) {
+                    html += `<div class="table-wrapper"><table><thead><tr><th>备注</th><th>时间</th><th>下发数量(USDT)</th><th>操作人</th></tr></thead><tbody>`;
+                    data.expense_bills.forEach(b => {
+                        html += `<tr><td><b>${b.remark}</b></td><td>${b.time}</td><td style="color:#e74c3c;font-weight:bold;">${b.usdt} USDT</td><td>${b.username}</td></tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                } else {
+                    html += `<div class="no-data">本日暂无任何下发数据流转</div>`;
+                }
+                html += `<div class="grid-container">
+                    <div class="card"><div class="card-label">💰 费率</div><div class="card-value">${data.fee_rate}%</div></div>
+                    <div class="card"><div class="card-label">💱 汇率</div><div class="card-value" style="color:#4b52be;">${data.exchange_rate}</div></div>
+                    <div class="card"><div class="card-label">👤 总入款(元)</div><div class="card-value">${data.total_rmb}</div></div>
+                    <div class="card"><div class="card-label">💵 总入款数量</div><div class="card-value" style="color:#2ecc71;">${data.total_usdt} USDT</div></div>
+                    <div class="card"><div class="card-label">📤 已下发</div><div class="card-value" style="color:#e74c3c;">${data.expense_usdt} USDT</div></div>
+                    <div class="card"><div class="card-label">🏛️ 未下发</div><div class="card-value" style="color:#f39c12;">${data.remaining_usdt} USDT</div></div>
+                </div>`;
+                document.getElementById('viewShell').innerHTML = html;
+            } catch(e) {
+                document.getElementById('viewShell').innerHTML = `<div class="no-data" style="color:red;">❌ 数据中继网关拥堵，正在自动重连...</div>`;
             }
-
-            if(parseQuery()) {
-                fetchData();
-                setInterval(() => {
-                    const today = new Date();
-                    let m = today.getMonth() + 1; let day = today.getDate();
-                    let checkStr = `${today.getFullYear()}-${m<10?'0'+m:m}-${day<10?'0'+day:day}`;
-                    if(selectedDay === checkStr) fetchData();
-                }, 4000);
-            }
-        </script>
-    </body>
-    </html>
-    '''
+        }
+        if(parseQuery()) {
+            fetchData();
+            setInterval(() => {
+                const today = new Date();
+                let m = today.getMonth() + 1; let day = today.getDate();
+                let checkStr = `${today.getFullYear()}-${m<10?'0'+m:m}-${day<10?'0'+day:day}`;
+                if(selectedDay === checkStr) fetchData();
+            }, 4000);
+        }
+    </script>
+</body>
+</html>'''
 
 @flask_app.route('/api/bill')
 def api_bill():
@@ -413,8 +367,7 @@ def api_bill():
         for row in income:
             remark, username, amount, usdt, ex_rate, ts = row
             rem_key = remark if remark else "无备注"
-            
-            # 分类合并统计逻辑 (对应图三)
+            
             if rem_key not in summary_by_remark:
                 summary_by_remark[rem_key] = {'count': 0, 'rmb': 0, 'usdt': 0}
             summary_by_remark[rem_key]['count'] += 1
@@ -422,27 +375,26 @@ def api_bill():
             summary_by_remark[rem_key]['usdt'] += usdt or 0
 
             income_bills.append({
-                'remark': remark or '-', 'username': username or '未知', 
-                'amount': f"{amount or 0:.0f}", 'usdt': f"{usdt or 0:.2f}", 
+                'remark': remark or '-', 'username': username or '未知', 
+                'amount': f"{amount or 0:.0f}", 'usdt': f"{usdt or 0:.2f}", 
                 'exchange_rate': f"{ex_rate or rate:.2f}", 'time': ts[11:19] if ts else ''
             })
 
         for row in expense:
             remark, username, usdt, ex_rate, ts = row
             expense_bills.append({
-                'remark': remark or '-', 'username': username or '未知', 
+                'remark': remark or '-', 'username': username or '未知', 
                 'usdt': f"{usdt or 0:.2f}", 'time': ts[11:19] if ts else ''
             })
 
-        # 格式化分类统计中的浮点数
         for k in summary_by_remark:
             summary_by_remark[k]['rmb'] = f"{summary_by_remark[k]['rmb']:.0f}"
             summary_by_remark[k]['usdt'] = f"{summary_by_remark[k]['usdt']:.2f}"
 
         res = jsonify({
-            'exchange_rate': f"{rate:.2f}", 'fee_rate': f"{fee_rate:.0f}", 'total_rmb': f"{total_rmb:.0f}", 
-            'total_usdt': f"{total_usdt:.2f}", 'expense_usdt': f"{expense_usdt:.2f}", 
-            'remaining_usdt': f"{total_usdt - expense_usdt:.2f}", 
+            'exchange_rate': f"{rate:.2f}", 'fee_rate': f"{fee_rate:.0f}", 'total_rmb': f"{total_rmb:.0f}", 
+            'total_usdt': f"{total_usdt:.2f}", 'expense_usdt': f"{expense_usdt:.2f}", 
+            'remaining_usdt': f"{total_usdt - expense_usdt:.2f}", 
             'income_bills': income_bills, 'expense_bills': expense_bills,
             'summary_by_remark': summary_by_remark
         })
@@ -451,7 +403,7 @@ def api_bill():
     except Exception as e:
         return jsonify({'error': True, 'msg': str(e)}), 500
 
-# ==================== 私聊常驻大键盘（100%还原图二） ====================
+# ==================== 私聊常驻大键盘 ====================
 def get_private_reply_keyboard():
     keyboard = [
         [KeyboardButton("试用"), KeyboardButton("开始")],
@@ -480,13 +432,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     uid = query.from_user.id
     await query.answer()
 
-    # 创始人特权充值审单流
     if query.data.startswith("v_approve_"):
         parts = query.data.split("_")
         t_uid = int(parts[2])
         m_count = int(parts[3])
         days = m_count * 30
-        
+        
         conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT expire_time FROM vip_users WHERE user_id = ?", (t_uid,))
@@ -497,17 +448,17 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 base = curr if curr > datetime.now() else datetime.now()
             except: base = datetime.now()
         else: base = datetime.now()
-        
+        
         new_expire = base + timedelta(days=days)
         exp_str = new_expire.strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT OR REPLACE INTO vip_users (user_id, username, expire_time) VALUES (?, '商用买家', ?)", (t_uid, exp_str))
         conn.commit()
         conn.close()
-        
+        
         await query.message.edit_caption(f"✅ 审核成功！买家资格已延期至：\n<code>{exp_str}</code>", parse_mode="HTML")
         try: await context.bot.send_message(chat_id=t_uid, text=f"🎉 恭喜！您的自助充值申请已审核通过！\n多群独立主控到期时间更新为：{exp_str}")
         except: pass
-    
+    
     elif query.data.startswith("v_reject_"):
         t_uid = int(query.data.split("_")[2])
         await query.message.edit_caption("❌ 账目不符，已驳回此转账截图。")
@@ -525,7 +476,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.effective_user:
         save_user_cache(uid, update.effective_user.username, update.effective_user.first_name)
 
-    # 1. 拦截私聊文字菜单请求 (对应图二的8个大常驻按钮点击)
     if chat_type == "private":
         if text == "试用":
             await update.message.reply_text("🆓 您当前已开启免费测试资格！可以直接将机器人邀请入群测试录入。")
@@ -561,8 +511,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⚙️ <b>设置群内操作记账员命令：</b>\n\n在群内直接发：\n👉 <code>设置操作人 @用户名</code>\n👉 <code>删除操作人 @用户名</code>", parse_mode="HTML")
         elif text == "开启/关闭计算功能":
             await update.message.reply_text("💡 群内发送 <code>上课</code> 开启记账计算，发送 <code>下课</code> 锁定清算本日账目并扎帐。")
-        
-        # 二级主人绑定文字命令拦截
         elif text.startswith("指派二级主人"):
             if not (uid in FOUNDER_USERS or is_vip_user(uid)): return
             if len(get_dynamic_masters_by_creator(uid)) >= 5 and uid not in FOUNDER_USERS:
@@ -581,7 +529,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text("❌ 格式不正确。示例：`指派二级主人 8179896441`")
         return
 
-    # 2. 群组内记账常规管理命令
     if text == '上课':
         if not can_use(gid, uid): return
         update_setting(gid, 'is_active', 1)
@@ -596,7 +543,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("🔴 <b>下课成功！今日账单已自动封存锁定归档。</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
-    # 精准模糊结合配置群组操作人
     if text.startswith('设置操作人'):
         if not (is_master(uid) or is_vip_user(uid)): return
         t_id, show_name = None, None
@@ -607,7 +553,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             t_id = update.message.reply_to_message.from_user.id
             u_obj = update.message.reply_to_message.from_user
             show_name = f"@{u_obj.username}" if u_obj.username else u_obj.first_name
-        
+        
         if t_id:
             ops = json.loads(get_setting(gid, 'operators') or '[]')
             if t_id not in ops: ops.append(t_id)
@@ -633,7 +579,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⚠️ <b>删除失败，无法在本地指引中反查到该用户名。</b>")
         return
 
-    # 记账数据解析挂钩
     if (get_setting(gid, 'is_active') or 0) == 0 or not can_use(gid, uid): return
 
     if text == '+0':
@@ -641,14 +586,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("📋 <b>点击下方查看实时对账：</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
-    # 解析下发
     m_exp = re.match(r'^(.*?)(?:下发|ထုတ်)\s*(-?\d+(?:\.\d+)?)$', text)
     if m_exp:
         add_bill(gid, uid, username, m_exp.group(1).strip(), float(m_exp.group(2)), 'expense')
         await update.message.reply_text(f"✅ 下发成功！点击原链接或输入 <code>+0</code> 刷新看板。", parse_mode="HTML")
         return
 
-    # 解析入款
     m_inc = re.match(r'^(.*?)([\+\-])(\d+(?:\.\d+)?)(?:/(\d+(?:\.\d+)?))?$', text)
     if m_inc:
         rem = m_inc.group(1).strip()
@@ -665,17 +608,16 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.effective_chat.type != "private": return
     uid = update.effective_user.id
     photo_id = update.message.photo[-1].file_id
-    
+    
     app_k = [
         [InlineKeyboardButton("✅ 批准 1个月", callback_data=f"v_approve_{uid}_1"), InlineKeyboardButton("✅ 批准 2个月", callback_data=f"v_approve_{uid}_2")],
         [InlineKeyboardButton("✅ 批准 3个月", callback_data=f"v_approve_{uid}_3"), InlineKeyboardButton("❌ 驳回", callback_data=f"v_reject_{uid}")]
     ]
-    # 推送至所有创始人手机端
     for f_id in FOUNDER_USERS:
         try:
             await context.bot.send_photo(
-                chat_id=f_id, photo=photo_id, 
-                caption=f"📸 <b>报告老板，有买家提交转账截图啦！</b>\n\n买家UID: <code>{uid}</code>\n买家用户名: @{update.effective_user.username or '无'}", 
+                chat_id=f_id, photo=photo_id, 
+                caption=f"📸 <b>报告老板，有买家提交转账截图啦！</b>\n\n买家UID: <code>{uid}</code>\n买家用户名: @{update.effective_user.username or '无'}", 
                 reply_markup=InlineKeyboardMarkup(app_k), parse_mode="HTML"
             )
         except: pass
