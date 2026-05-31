@@ -13,18 +13,15 @@ import os
 # ==================== 日志与基础配置 ====================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = "8961723870:AAEt2fTE-Q9QKEspB6TSXEhrVTu75SR31U0"
-WEB_URL = "https://xiaogenban-6688hjk.onrender.com"
+TOKEN = "8961723870:AAEM7urgrTIz_ZYljLj317YN5PHr5SJm_ew"
+WEB_URL = "https://xiaogenban-6688jk.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
-# 创始超级管理员（最高控制端ID，永远不可被普通买家删除）
 FOUNDER_USERS = [8179896441]
-
-# 销售收款与三档阶梯价格配置
 TRON_ADDRESS = "TVnjLwDrGjYVRTa1ukfoE2mFTmCxtrjoCw"
-PRICE_1_MONTH = 80   
-PRICE_2_MONTH = 130  
-PRICE_3_MONTH = 220  
+PRICE_1_MONTH = 80   
+PRICE_2_MONTH = 130  
+PRICE_3_MONTH = 220  
 
 TIMEZONES = {
     'china': 'Asia/Shanghai',
@@ -34,7 +31,7 @@ TIMEZONES = {
 
 flask_app = Flask(__name__)
 
-# ==================== 数据库安全连接引擎 (WAL高并发防锁) ====================
+# ==================== 数据库引擎 ====================
 def get_db_connection():
     conn = sqlite3.connect('bot_data.db', timeout=60.0)
     conn.execute('PRAGMA journal_mode=WAL;')
@@ -61,10 +58,8 @@ def init_db():
     conn.commit()
     conn.close()
 
-# ==================== 成员 UID 自动拦截与反查缓存 ====================
 def save_user_cache(user_id, username, first_name):
-    if not username:
-        return
+    if not username: return
     username_lower = username.lower()
     display_name = f"@{username}"
     try:
@@ -75,11 +70,10 @@ def save_user_cache(user_id, username, first_name):
         conn.commit()
         conn.close()
     except Exception as e:
-        logging.error(f"UID安全抓取异常: {e}")
+        logging.error(f"UID抓取异常: {e}")
 
 def get_user_id_by_username(username_str):
-    if not username_str:
-        return None, None
+    if not username_str: return None, None
     username_lower = username_str.replace('@', '').strip().lower()
     try:
         conn = get_db_connection()
@@ -87,13 +81,11 @@ def get_user_id_by_username(username_str):
         c.execute("SELECT user_id, display_name FROM user_caches WHERE username_lower = ?", (username_lower,))
         row = c.fetchone()
         conn.close()
-        if row:
-            return row[0], row[1]
+        if row: return row[0], row[1]
     except Exception as e:
         logging.error(f"UID反查异常: {e}")
     return None, None
 
-# ==================== 核心时间计算时区 ====================
 def get_current_time(timezone_str):
     try:
         tz = pytz.timezone(timezone_str)
@@ -104,7 +96,7 @@ def get_current_time(timezone_str):
         now = datetime.now(tz)
         return now, now.strftime("%H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
 
-# ==================== 商业权限判定系统 ====================
+# ==================== 权限与配置系统 ====================
 def get_all_masters():
     masters = list(FOUNDER_USERS)
     try:
@@ -114,8 +106,7 @@ def get_all_masters():
         rows = c.fetchall()
         conn.close()
         for row in rows:
-            if row[0] not in masters: 
-                masters.append(row[0])
+            if row[0] not in masters: masters.append(row[0])
     except: pass
     return masters
 
@@ -187,7 +178,7 @@ def update_setting(group_id, key, value):
     except Exception as e:
         logging.error(f"配置更新失败: {e}")
 
-# ==================== 账目数据安全读写 ====================
+# ==================== 账目核心读写 ====================
 def add_bill(group_id, user_id, username, remark, amount, bill_type, exchange_rate=None):
     if exchange_rate is None:
         exchange_rate = get_setting(group_id, 'exchange_rate') or 7.2
@@ -195,14 +186,14 @@ def add_bill(group_id, user_id, username, remark, amount, bill_type, exchange_ra
         usdt_amount = amount / exchange_rate
     else:
         usdt_amount = amount
-        
+        
     tz_str = get_setting(group_id, 'timezone') or 'Asia/Shanghai'
     now, _, full_time = get_current_time(tz_str)
     date_str = now.strftime("%Y-%m-%d")
-    
+    
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''INSERT INTO bills 
+    c.execute('''INSERT INTO bills 
                  (group_id, user_id, username, remark, amount, usdt_amount, exchange_rate, bill_type, timestamp, date_str, is_settled)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)''',
               (group_id, user_id, username, remark, amount, usdt_amount, exchange_rate, bill_type, full_time, date_str))
@@ -276,72 +267,180 @@ def delete_user_bills(group_id, name):
     conn.close()
     return deleted
 
-# ==================== Web 网页端页面 (全面加固负数 ID 传输) ====================
+# ==================== 终极重构 Web 前端页面 (破除缓存与精准匹配) ====================
 @flask_app.route('/')
 def index():
     return '''
     <!DOCTYPE html>
     <html>
-    <head><meta charset="UTF-8"><title>课时历史账单系统</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#f0f2f5;padding:20px;}.container{max-width:1400px;margin:0 auto;background:white;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.1);overflow:hidden;}.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:24px 30px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:15px;}.header-text{flex:1;}.header h1{font-size:28px;margin-bottom:8px;}.date-picker-box{background:rgba(255,255,255,0.2);padding:10px 15px;border-radius:8px;color:white;}.date-picker-box label{font-size:14px;margin-right:8px;font-weight:bold;}.date-picker-box input{border:none;padding:6px 10px;border-radius:4px;font-size:14px;outline:none;}.content{padding:24px 30px;}.section{margin-bottom:32px;}.section-title{font-size:18px;font-weight:600;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid #667eea;}table{width:100%;border-collapse:collapse;font-size:14px;}th,td{padding:12px 10px;text-align:left;border-bottom:1px solid #eef2f6;}th{background:#f8f9fc;font-weight:600;}.stats-box{background:linear-gradient(135deg,#f8f9fc 0%,#f0f2f5 100%);border-radius:12px;padding:24px;margin-top:20px;}.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;}.stat-card{background:white;padding:16px;border-radius:12px;text-align:center;}.stat-label{font-size:12px;color:#888;margin-bottom:8px;}.stat-value{font-size:24px;font-weight:700;color:#333;}.stat-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eef2f6;}.stat-name{font-weight:500;color:#333;}.stat-number{color:#667eea;font-weight:600;}.loading{text-align:center;padding:50px;color:#888;}</style></head>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>课时历史账单系统</title>
+        <style>
+            *{margin:0;padding:0;box-sizing:border-box;}
+            body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#f0f2f5;padding:15px;}
+            .container{max-width:1400px;margin:0 auto;background:white;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;}
+            .header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:15px;}
+            .header h1{font-size:22px;margin-bottom:4px;}
+            .header p{font-size:12px;opacity:0.9;}
+            .date-picker-box{background:rgba(255,255,255,0.2);padding:8px 12px;border-radius:8px;color:white;display:flex;align-items:center;gap:8px;}
+            .date-picker-box label{font-size:14px;font-weight:bold;}
+            .date-picker-box input{border:none;padding:6px 10px;border-radius:6px;font-size:14px;outline:none;}
+            .content{padding:20px;}
+            .section{margin-bottom:25px;}
+            .section-title{font-size:16px;font-weight:600;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #667eea;color:#333;}
+            .table-responsive{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+            table{width:100%;border-collapse:collapse;font-size:14px;white-space:nowrap;}
+            th,td{padding:12px 10px;text-align:left;border-bottom:1px solid #eef2f6;}
+            th{background:#f8f9fc;font-weight:600;color:#666;}
+            .stats-box{background:linear-gradient(135deg,#f8f9fc 0%,#f0f2f5 100%);border-radius:12px;padding:20px;margin-top:20px;}
+            .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;}
+            .stat-card{background:white;padding:14px;border-radius:10px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,0.02);}
+            .stat-label{font-size:12px;color:#888;margin-bottom:6px;}
+            .stat-value{font-size:20px;font-weight:700;color:#333;}
+            .stat-item{display:flex;justify-content:space-between;padding:10px;background:#f8f9fc;border-radius:6px;margin-bottom:6px;font-size:14px;}
+            .stat-name{font-weight:500;color:#333;}
+            .stat-number{color:#667eea;font-weight:600;}
+            .loading{text-align:center;padding:50px 20px;color:#764ba2;font-size:16px;font-weight:500;}
+        </style>
+    </head>
     <body>
         <div class="container">
             <div class="header">
-                <div class="header-text">
-                    <h1>📋 实时课堂账单历史明细</h1>
-                    <p id="dateInfo">数据已开启毫秒级并发防锁死保护</p>
+                <div>
+                    <h1 id="titleText">📋 实时课堂账单系统</h1>
+                    <p id="debugInfo">数据通道已开启智能并发保护</p>
                 </div>
                 <div class="date-picker-box">
-                    <label>📅 选择账单日期:</label>
+                    <label>📅 选择日期:</label>
                     <input type="date" id="targetDate" onchange="onDateChange()">
                 </div>
             </div>
-            <div class="content" id="content"><div class="loading">正在同步实时账单...</div></div>
+            <div class="content" id="content">
+                <div class="loading">正在建立高并发数据对账通道...</div>
+            </div>
         </div>
+
         <script>
-            let GROUP_ID = null; let currentSelectedDate = "";
-            const today = new Date(); const yyyy = today.getFullYear(); let mm = today.getMonth() + 1; let dd = today.getDate();
-            if (mm < 10) mm = '0' + mm; if (dd < 10) dd = '0' + dd;
-            currentSelectedDate = `${yyyy}-${mm}-${dd}`; document.getElementById('targetDate').value = currentSelectedDate;
+            let currentGroupId = "";
+            let currentSelectedDate = "";
 
-            function getGroupID() { 
-                const urlParams = new URLSearchParams(window.location.search); 
-                // 核心修复：直接获取完整字符串，不丢失负号
-                GROUP_ID = urlParams.get('group_id'); 
-                if (!GROUP_ID) { document.getElementById('content').innerHTML = '<div class="loading">❌ 请通过机器人的 "查看完整账单" 按钮访问</div>'; return false; } 
-                return true; 
+            // 终极修复：使用最高优先级正则表达式完美抓取 group_id 的正负数字
+            function initParam() {
+                const match = window.location.href.match(/[?&]group_id=([^&#]*)/);
+                if (match && match[1]) {
+                    currentGroupId = decodeURIComponent(match[1]).trim();
+                    document.getElementById('debugInfo').innerText = "当前关联群组ID: " + currentGroupId;
+                } else {
+                    document.getElementById('content').innerHTML = '<div class="loading" style="color:red;">❌ 错误：未检测到合法的群组凭证，请通过群内【查看完整账单】按钮重新进入。</div>';
+                    return false;
+                }
+
+                const today = new Date();
+                const yyyy = today.getFullYear();
+                let mm = today.getMonth() + 1;
+                let dd = today.getDate();
+                if (mm < 10) mm = '0' + mm;
+                if (dd < 10) dd = '0' + dd;
+                currentSelectedDate = `${yyyy}-${mm}-${dd}`;
+                document.getElementById('targetDate').value = currentSelectedDate;
+                return true;
             }
-            function onDateChange() { currentSelectedDate = document.getElementById('targetDate').value; loadData(); }
 
-            async function loadData() { 
-                if (!GROUP_ID) return;
-                try { 
-                    // 核心修复：对 GROUP_ID 负数编码传输
-                    const response = await fetch(`/api/bill?group_id=${encodeURIComponent(GROUP_ID)}&date=${currentSelectedDate}`); 
-                    const data = await response.json(); 
-                    if (data.error || (!data.income_bills.length && !data.expense_bills.length)) { 
-                        document.getElementById('content').innerHTML = `<div class="loading">📅 ${currentSelectedDate} 暂无账单数据记录</div>`; return; 
+            function onDateChange() {
+                currentSelectedDate = document.getElementById('targetDate').value;
+                loadData();
+            }
+
+            async function loadData() {
+                if (!currentGroupId) return;
+                try {
+                    // 双重保险：引入 _t= 毫秒级时间戳，彻底打破各大手机浏览器以及 Render 节点的强制页面缓存
+                    const timestamp = new Date().getTime();
+                    const targetUrl = `/api/bill?group_id=${encodeURIComponent(currentGroupId)}&date=${currentSelectedDate}&_t=${timestamp}`;
+                    
+                    const response = await fetch(targetUrl);
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        document.getElementById('content').innerHTML = `<div class="loading" style="color:red;">❌ 系统加载异常: ${data.msg}</div>`;
+                        return;
                     }
-                    let suffix = data.show_usdt ? ' USDT' : ''; let html = '';
-                    if (data.income_bills && data.income_bills.length > 0) { 
-                        html += `<div class="section"><div class="section-title">📥 入款记录 (${data.income_bills.length} 笔)</div><table><thead><tr><th>备注</th><th>时间</th><th>金额(元)</th><th>汇率</th><th>等值数量</th><th>操作人</th></tr></thead><tbody>`; 
-                        for (const bill of data.income_bills) { html += `<tr><td><b>${bill.remark}</b></td><td>${bill.time}</td><td>${bill.amount}</td><td>${bill.exchange_rate}</td><td>${bill.usdt}${suffix}</td><td>${bill.username}</td></tr>`; } 
-                        html += `</tbody></table></div>`; 
+
+                    // 即使没有数据，也把整个表格框架和统计面板渲染出来，告别死板的单行提示
+                    let suffix = data.show_usdt ? ' U' : '';
+                    let html = '';
+
+                    // 1. 入款表格部分
+                    html += `<div class="section"><div class="section-title">📥 入款明细记录 (${data.income_bills ? data.income_bills.length : 0} 笔)</div><div class="table-responsive">`;
+                    if (data.income_bills && data.income_bills.length > 0) {
+                        html += `<table><thead><tr><th>备注参数</th><th>实时时间</th><th>金额(元)</th><th>即时汇率</th><th>等值数量</th><th>经办记账员</th></tr></thead><tbody>`;
+                        for (const bill of data.income_bills) {
+                            html += `<tr><td><b>${bill.remark}</b></td><td>${bill.time}</td><td>${bill.amount}</td><td>${bill.exchange_rate}</td><td style="color:green;font-weight:bold;">${bill.usdt}${suffix}</td><td>${bill.username}</td></tr>`;
+                        }
+                        html += `</tbody></table>`;
+                    } else {
+                        html += `<div style="padding:20px;text-align:center;color:#999;font-size:14px;">本日暂无任何入款账单流转</div>`;
                     }
-                    if (data.expense_bills && data.expense_bills.length > 0) { 
-                        html += `<div class="section"><div class="section-title">📤 下发记录 (${data.expense_bills.length} 笔)</div><table><thead><tr><th>备注</th><th>时间</th><th>下发数量</th><th>操作人</th></tr></thead><tbody>`; 
-                        for (const bill of data.expense_bills) { html += `<tr><td><b>${bill.remark}</b></td><td>${bill.time}</td><td>${bill.usdt}${suffix}</td><td>${bill.username}</td></tr>`; } 
-                        html += `</tbody></table></div>`; 
+                    html += `</div></div>`;
+
+                    // 2. 下发表格部分
+                    html += `<div class="section"><div class="section-title">📤 下发记录明细 (${data.expense_bills ? data.expense_bills.length : 0} 笔)</div><div class="table-responsive">`;
+                    if (data.expense_bills && data.expense_bills.length > 0) {
+                        html += `<table><thead><tr><th>下发备注</th><th>实时时间</th><th>下发数量</th><th>经办记账员</th></tr></thead><tbody>`;
+                        for (const bill of data.expense_bills) {
+                            html += `<tr><td><b>${bill.remark}</b></td><td>${bill.time}</td><td style="color:red;font-weight:bold;">${bill.usdt}${suffix}</td><td>${bill.username}</td></tr>`;
+                        }
+                        html += `</tbody></table>`;
+                    } else {
+                        html += `<div style="padding:20px;text-align:center;color:#999;font-size:14px;">本日暂无任何下发数据流转</div>`;
                     }
-                    if (data.remark_stats && data.remark_stats.length > 0) { 
-                        html += `<div class="section"><div class="section-title">📊 备注分类统计</div>`; 
-                        for (const stat of data.remark_stats) { html += `<div class="stat-item"><span class="stat-name">📝 ${stat.remark}</span><span class="stat-number">${stat.count}笔 | ${stat.amount}元 | ${stat.usdt}${suffix}</span></div>`; } 
-                        html += `</div>`; 
+                    html += `</div></div>`;
+
+                    // 3. 分类备注统计部分
+                    if (data.remark_stats && data.remark_stats.length > 0) {
+                        html += `<div class="section"><div class="section-title">📊 备注分类汇总统计</div>`;
+                        for (const stat of data.remark_stats) {
+                            html += `<div class="stat-item"><span class="stat-name">📝 ${stat.remark}</span><span class="stat-number">${stat.count}笔 | ${stat.amount}元 | ${stat.usdt}${suffix}</span></div>`;
+                        }
+                        html += `</div>`;
                     }
-                    html += `<div class="stats-box"><div class="stats-grid"><div class="stat-card"><div class="stat-label">💰 费率</div><div class="stat-value">${data.fee_rate}%</div></div><div class="stat-card"><div class="stat-label">💱 汇率</div><div class="stat-value">${data.exchange_rate}</div></div><div class="stat-card"><div class="stat-label">📥 总入款(元)</div><div class="stat-value">${data.total_rmb}</div></div><div class="stat-card"><div class="stat-label">💵 总入款数量</div><div class="stat-value">${data.total_usdt}${suffix}</div></div><div class="stat-card"><div class="stat-label">📤 已下发</div><div class="stat-value">${data.expense_usdt}${suffix}</div></div><div class="stat-card"><div class="stat-label">📊 未下发</div><div class="stat-value">${data.remaining_usdt}${suffix}</div></div></div></div>`;
+
+                    // 4. 全局总控网格面板
+                    html += `
+                    <div class="stats-box">
+                        <div class="stats-grid">
+                            <div class="stat-card"><div class="stat-label">💰 设定手续费率</div><div class="stat-value" style="color:#764ba2;">${data.fee_rate}%</div></div>
+                            <div class="stat-card"><div class="stat-label">💱 当前设定汇率</div><div class="stat-value" style="color:#667eea;">${data.exchange_rate}</div></div>
+                            <div class="stat-card"><div class="stat-label">📥 总入款金额</div><div class="stat-value" style="color:#333;">${data.total_rmb} 元</div></div>
+                            <div class="stat-card"><div class="stat-label">💵 入款总折合</div><div class="stat-value" style="color:green;">${data.total_usdt}${suffix}</div></div>
+                            <div class="stat-card"><div class="stat-label">📤 累计已下发</div><div class="stat-value" style="color:red;">${data.expense_usdt}${suffix}</div></div>
+                            <div class="stat-card"><div class="stat-label">📊 结余未下发</div><div class="stat-value" style="color:#ff9800;">${data.remaining_usdt}${suffix}</div></div>
+                        </div>
+                    </div>`;
+
                     document.getElementById('content').innerHTML = html;
-                } catch (err) { document.getElementById('content').innerHTML = '<div class="loading">❌ 数据解析错误或网络异常</div>'; }
+                } catch (err) {
+                    document.getElementById('content').innerHTML = '<div class="loading" style="color:red;">❌ 核心对账通道解析故障，请刷新页面重试。</div>';
+                }
             }
-            if (getGroupID()) { loadData(); setInterval(() => { const t = new Date(); let m = t.getMonth() + 1; let d = t.getDate(); if (m < 10) m = '0' + m; if (d < 10) d = '0' + d; if (currentSelectedDate === `${t.getFullYear()}-${m}-${d}`) { loadData(); } }, 2500); }
+
+            // 初始化入口并开启无缝毫秒级数据通道轮询
+            if (initParam()) {
+                loadData();
+                setInterval(() => {
+                    const t = new Date();
+                    let m = t.getMonth() + 1;
+                    let d = t.getDate();
+                    if (m < 10) m = '0' + m;
+                    if (d < 10) d = '0' + d;
+                    // 仅在查询当天账单时开启无感知静默自动刷新
+                    if (currentSelectedDate === `${t.getFullYear()}-${m}-${d}`) {
+                        loadData();
+                    }
+                }, 3000);
+            }
         </script>
     </body>
     </html>
@@ -350,36 +449,35 @@ def index():
 @flask_app.route('/api/bill')
 def api_bill():
     try:
-        # 核心修复：支持负数群组 ID 的安全解析
-        group_id_str = request.args.get('group_id', default='0')
+        group_id_str = request.args.get('group_id', default='0').strip()
         try:
             group_id = int(group_id_str)
         except:
             group_id = 0
-            
+            
         tz_str = get_setting(group_id, 'timezone') or 'Asia/Shanghai'
         now, _, _ = get_current_time(tz_str)
         today_str = now.strftime("%Y-%m-%d")
         target_date = request.args.get('date', default=today_str)
-        
+        
         income, expense, total_income, total_expense = get_class_bills_by_date(group_id, target_date)
         rate = get_setting(group_id, 'exchange_rate') or 7.2
         fee_rate = get_setting(group_id, 'fee_rate') or 0
         show_usdt = get_setting(group_id, 'show_usdt') or 1
-        
+        
         total_rmb = total_income[0] if (total_income and total_income[0]) else 0
         total_usdt = total_income[1] if (total_income and total_income[1]) else 0
         expense_usdt = total_expense[0] if (total_expense and total_expense[0]) else 0
-        
+        
         income_bills = []
         expense_bills = []
         for row in income:
             remark, username, amount, usdt, ex_rate, ts = row
-            time_str = ts[5:16] if (ts and len(ts) > 11) else (ts or '-')
+            time_str = ts[11:16] if (ts and len(ts) > 16) else (ts or '-')
             income_bills.append({'remark': remark or '-', 'username': username or '未知', 'amount': f"{amount or 0:.0f}", 'usdt': f"{usdt or 0:.2f}", 'exchange_rate': f"{ex_rate or rate:.2f}", 'time': time_str})
         for row in expense:
             remark, username, usdt, ex_rate, ts = row
-            time_str = ts[5:16] if (ts and len(ts) > 11) else (ts or '-')
+            time_str = ts[11:16] if (ts and len(ts) > 16) else (ts or '-')
             expense_bills.append({'remark': remark or '-', 'username': username or '未知', 'usdt': f"{usdt or 0:.2f}", 'time': time_str})
 
         remark_stats = []
@@ -389,17 +487,22 @@ def api_bill():
         for row in c.fetchall():
             remark_stats.append({'remark': row[0] if row[0] else '无备注', 'count': row[1] or 0, 'amount': f"{row[2] or 0:.0f}", 'usdt': f"{row[3] or 0:.2f}"})
         conn.close()
-        
-        return jsonify({
-            'exchange_rate': f"{rate:.2f}", 'fee_rate': f"{fee_rate:.0f}", 'total_rmb': f"{total_rmb:.0f}", 
-            'total_usdt': f"{total_usdt:.2f}", 'expense_usdt': f"{expense_usdt:.2f}", 
-            'remaining_usdt': f"{total_usdt - expense_usdt:.2f}", 'show_usdt': int(show_usdt), 
+        
+        # 显式加入不缓存头部响应
+        res = jsonify({
+            'exchange_rate': f"{rate:.2f}", 'fee_rate': f"{fee_rate:.0f}", 'total_rmb': f"{total_rmb:.0f}", 
+            'total_usdt': f"{total_usdt:.2f}", 'expense_usdt': f"{expense_usdt:.2f}", 
+            'remaining_usdt': f"{total_usdt - expense_usdt:.2f}", 'show_usdt': int(show_usdt), 
             'income_bills': income_bills, 'expense_bills': expense_bills, 'remark_stats': remark_stats
         })
+        res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        res.headers["Pragma"] = "no-cache"
+        res.headers["Expires"] = "0"
+        return res
     except Exception as e:
         return jsonify({'error': True, 'msg': str(e)}), 500
 
-# ==================== 智能面板多语言生成包 ====================
+# ==================== 多语言面板处理 ====================
 def get_help_text(lang):
     if lang == 'myanmar':
         return """
@@ -417,7 +520,7 @@ def get_help_text(lang):
 `အတန်းစ` / `上课` - SaYinKoing Sinit PhwintChin
 `အတန်းဆင်း` / `下课` - SaYinPate Pyee ShinLinChin
 `ငွေလဲနှုန်း 7.2` / `设置汇率 7.2` - ThatMatRanyan
-`အော်ပရေတာခန့်ရန် @username` / `设置操作人 @username` - KhantRanyan 
+`အော်ပရေတာခန့်ရန် @username` / `设置操作人 @username` - KhantRanyan 
 `အော်ပရေတာစာရင်း` / `查看操作员列表` - KyiRanyan
 `ဘာသာစကား` / `改语言` - PyaungRanyan (中文/မြန်မာ)
 `အချိန်သတ်မှတ်` / `设置时间` - AChainZone PyaungRanyan
@@ -454,7 +557,7 @@ def get_bill_content(income, expense, total_rmb, total_usdt, expense_usdt, rate,
         income_title, expense_title, rate_text, total_text, exp_text, rem_text = "📥 ငွေဝင်", "📤 ထုတ်ငွေ", "💰 လဲနှုန်း", "📊 စုစုပေါင်း", "📊 ထုတ်ပြီး", "📊 ကျန်ငွေ"
     else:
         income_title, expense_title, rate_text, total_text, exp_text, rem_text = "📥 入款", "📤 下发", "💰 汇率", "📊 总入款", "📊 已下发", "📊 未下发"
-        
+        
     message = f"📊 账单汇总 ({today_date})\n\n"
     if income:
         message += f"{income_title}:\n"
@@ -472,7 +575,7 @@ def get_bill_content(income, expense, total_rmb, total_usdt, expense_usdt, rate,
             rem_str = f"【{remark}】" if remark else ""
             message += f"  {time_short} {rem_str}{usdt or 0:.1f}{unit}\n"
         message += "\n"
-        
+        
     message += f"{rate_text}: {rate:.2f}\n"
     message += f"{total_text}: {total_rmb:.0f} | {total_usdt:.1f}{unit}\n"
     message += f"{exp_text}: {expense_usdt:.1f}{unit}\n"
@@ -483,14 +586,14 @@ async def show_full_bill(update: Update, gid):
     tz_str = get_setting(gid, 'timezone') or 'Asia/Shanghai'
     now, _, _ = get_current_time(tz_str)
     today_date = now.strftime("%Y-%m-%d")
-    
+    
     income, expense, total_income, total_expense = get_class_bills_by_date(gid, today_date)
     rate = get_setting(gid, 'exchange_rate') or 7.2
     lang = get_setting(gid, 'language') or 'chinese'
     total_rmb = total_income[0] or 0
     total_usdt = total_income[1] or 0
     expense_usdt = total_expense[0] or 0
-    
+    
     message = get_bill_content(income, expense, total_rmb, total_usdt, expense_usdt, rate, today_date, lang)
     keyboard = [
         [InlineKeyboardButton("📊 完整账单 (Web)", url=f"{WEB_URL}?group_id={gid}")],
@@ -501,19 +604,16 @@ async def show_full_bill(update: Update, gid):
     elif update.callback_query:
         await update.callback_query.message.reply_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ==================== 私聊高级控制台键盘 ====================
 def get_private_main_keyboard(user_id):
     keyboard = [
         [InlineKeyboardButton("💰 充值续费套餐", callback_data="menu_renew"),
          InlineKeyboardButton("📅 检查到期时间", callback_data="menu_expire")]
     ]
-    
     if is_vip_user(user_id) or user_id in FOUNDER_USERS:
         keyboard.append([
             InlineKeyboardButton("👑 添加机器人主", callback_data="menu_add_master"),
             InlineKeyboardButton("❌ 取掉机器人主", callback_data="menu_del_master_panel")
         ])
-        
     keyboard.append([
         InlineKeyboardButton("📖 使用指南", callback_data="menu_help"),
         InlineKeyboardButton("🌐 账单网页端", url=WEB_URL)
@@ -522,34 +622,25 @@ def get_private_main_keyboard(user_id):
 
 def get_renew_text():
     return f"""
-💰 <b>【智能记账系统 - 三档特惠续费套餐】</b>
+💰 <b>【智能记账系统 - 续费套餐】</b>
 ---
-📊 <b>当前最新特惠价格：</b>
-🔴 <b>1 个月 (30天)：</b> <code>{PRICE_1_MONTH} USDT</code>
-🟡 <b>2 个月 (60天)：</b> <code>{PRICE_2_MONTH} USDT</code>
-🟢 <b>3 个月 (90天)：</b> <code>{PRICE_3_MONTH} USDT</code>
+🔴 <b>1 个月：</b> <code>{PRICE_1_MONTH} USDT</code>
+🟡 <b>2 个月：</b> <code>{PRICE_2_MONTH} USDT</code>
+🟢 <b>3 个月：</b> <code>{PRICE_3_MONTH} USDT</code>
 
-🌟 <b>特权包干：</b> 购买后，您名下在<b>【无数个群组】</b>拉入此机器人均可自动解锁，不受限制！
-
-📌 <b>自主转账与截图核对流程：</b>
-1️⃣ 请向下方 <b>TRX/波场</b> 官方收币地址转账对应套餐金额：
-👉 <code>{TRON_ADDRESS}</code> <i>(点击可自动复制)</i>
-
-2️⃣ 转账成功后，<b>请直接将您的【转账成功截图】发送到当前私聊对话框中！</b>
-3️⃣ 机器人会自动将截图提交给创始主人审核，审核通过后秒开特权！
+📌 <b>收款地址：</b>
+👉 <code>{TRON_ADDRESS}</code> <i>(点击自动复制)</i>
+转账成功后请发<b>转账截图</b>到本私料！
 """
 
-# ==================== 核心网关分流交互处理器 ====================
+# ==================== 核心网关交互 ====================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if update.effective_chat.type == "private":
-        welcome_text = (
-            f"👋 您好，<b>{update.effective_user.first_name}</b>！欢迎使用智能记账多群分销版后台管理大厅。\n\n"
-            f"💡 请使用下方的高级控制面板管理您的记账特权、绑定新主人或查看账单："
-        )
+        welcome_text = f"👋 您好！智能记账多群分销版后台管理大厅。\n💡 请使用下方面板管理："
         await update.message.reply_text(welcome_text, reply_markup=get_private_main_keyboard(uid), parse_mode="HTML")
     else:
-        await update.message.reply_text("📊 记账机器人已在群组就绪！白名单用户/操作人请输入 <code>上课</code> 开启记账。私聊我可进入充值大厅。", parse_mode="HTML")
+        await update.message.reply_text("📊 记账机器人已就绪！请输入 <code>上课</code> 开启记账。", parse_mode="HTML")
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -558,49 +649,36 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     if update.effective_chat.type != "private":
-        if not can_use(gid, uid):
-            await query.answer("❌ 您没有权限点击此机器人的操作按钮", show_alert=True)
-            return
+        if not can_use(gid, uid): return
 
     if query.data.startswith("img_approve_"):
         parts = query.data.split("_")
         target_uid = int(parts[2])
         months = int(parts[3])
         days_to_add = months * 30
-        
         conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT expire_time FROM vip_users WHERE user_id = ?", (target_uid,))
         row = c.fetchone()
-        
         if row:
             try:
                 current_expire = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
-                if current_expire > datetime.now():
-                    new_expire = current_expire + timedelta(days=days_to_add)
-                else:
-                    new_expire = datetime.now() + timedelta(days=days_to_add)
-            except:
-                new_expire = datetime.now() + timedelta(days=days_to_add)
-        else:
-            new_expire = datetime.now() + timedelta(days=days_to_add)
-            
+                new_expire = (current_expire if current_expire > datetime.now() else datetime.now()) + timedelta(days=days_to_add)
+            except: new_expire = datetime.now() + timedelta(days=days_to_add)
+        else: new_expire = datetime.now() + timedelta(days=days_to_add)
         expire_str = new_expire.strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT OR REPLACE INTO vip_users (user_id, username, expire_time) VALUES (?, ?, ?)", (target_uid, "包月买家", expire_str))
         conn.commit()
         conn.close()
-        
-        await query.message.edit_caption(f"✅ <b>图片审核成功！</b>\n已为买家 (ID: <code>{target_uid}</code>) 快捷开通 <b>{months} 个月 ({days_to_add}天)</b> VIP特权。\n新到期时间：<code>{expire_str}</code>", parse_mode="HTML")
-        try:
-            await context.bot.send_message(chat_id=target_uid, text=f"🎉 <b>您的转账截图已审核通过！</b>\n已为您成功解锁/续费 <b>{months} 个月</b> 独立多群无限记账 VIP 权限！")
+        await query.message.edit_caption(f"✅ 审核成功！买家到期时间已更新：<code>{expire_str}</code>", parse_mode="HTML")
+        try: await context.bot.send_message(chat_id=target_uid, text=f"🎉 您的转账截图已通过核对！已为您成功解锁多群 VIP 权限，到期时间：{expire_str}")
         except: pass
         return
 
     elif query.data.startswith("img_reject_"):
         target_uid = int(query.data.split("_")[2])
-        await query.message.edit_caption(f"❌ <b>已拒绝此截图凭证。</b>\n已通知该买家截图未通过核对。", parse_mode="HTML")
-        try:
-            await context.bot.send_message(chat_id=target_uid, text="⚠️ <b>您的转账截图对账未通过审核。</b>\n请确保发送的是本次交易成功的真实截图，或联系创始人进行人工复核。")
+        await query.message.edit_caption(f"❌ 已拒绝此截图凭证。", parse_mode="HTML")
+        try: await context.bot.send_message(chat_id=target_uid, text="⚠️ 您的转账截图对账未通过审核，请检查后重新发送。")
         except: pass
         return
 
@@ -612,18 +690,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         c.execute("INSERT OR REPLACE INTO vip_users (user_id, username, expire_time) VALUES (?, ?, ?)", (target_uid, "包月买家", expire_date))
         conn.commit()
         conn.close()
-        await query.message.edit_text(f"✅ <b>已确认到账！</b>\n已成功为买家 (ID: <code>{target_uid}</code>) 激活多群独立记账VIP资格（30天）。", parse_mode="HTML")
-        try:
-            await context.bot.send_message(chat_id=target_uid, text="🎉 <b>您的付款已核对成功！</b>\n系统已为您全面解锁多群无限制建群、无限记账 VIP 权限！")
+        await query.message.edit_text(f"✅ 已确认到账！已成功激活VIP资格（30天）。", parse_mode="HTML")
+        try: await context.bot.send_message(chat_id=target_uid, text="🎉 您的付款已核对成功！多群独立记账已解锁。")
         except: pass
         return
 
     elif query.data.startswith("admin_reject_"):
         target_uid = int(query.data.split("_")[2])
-        await query.message.edit_text(f"❌ <b>已拒绝开通。</b>\n已通知买家 (ID: <code>{target_uid}</code>) 账单未核对成功。", parse_mode="HTML")
-        try:
-            await context.bot.send_message(chat_id=target_uid, text="⚠️ <b>通知：您的付款对账未通过审核。</b>\n请检查对账信息是否正确。")
-        except: pass
+        await query.message.edit_text(f"❌ 已拒绝开通。", parse_mode="HTML")
         return
 
     if query.data == 'show_help':
@@ -651,90 +725,58 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         c.execute("SELECT expire_time FROM vip_users WHERE user_id = ?", (uid,))
         row = c.fetchone()
         conn.close()
-        if uid in FOUNDER_USERS: status_text = "📅 <b>特权状态：</b> ⚖️ 创始人账户（永久有效）"
-        elif row: status_text = f"📅 <b>特权到期时间：</b> <code>{row[0]}</code>\n💡 有效期内可在任意群内正常上课记账。"
-        else: status_text = "⚠️ <b>特权状态：</b> 您当前尚未开通多群包月VIP资格，请点击充值续费。"
+        if uid in FOUNDER_USERS: status_text = "📅 ⚖️ 创始人账户（永久有效）"
+        elif row: status_text = f"📅 VIP到期时间：<code>{row[0]}</code>"
+        else: status_text = "⚠️ 当前尚未开通独立记账多群版VIP资格。"
         await query.message.reply_text(status_text, parse_mode="HTML")
-        
     elif query.data == "menu_add_master":
-        if not (uid in FOUNDER_USERS or is_vip_user(uid)):
-            await query.message.reply_text("❌ 抱歉，您当前还没有开通多群VIP特权，无权添加新的机器人主人。")
-            return
-        current_count = get_dynamic_masters_count_by_creator(uid)
-        if current_count >= 3 and uid not in FOUNDER_USERS:
-            await query.message.reply_text("⚠️ <b>系统提示：授权失败</b>\n您名下的二级机器人主人已经开满 3 个，请先移除一个后再行添加。", parse_mode="HTML")
+        if not (uid in FOUNDER_USERS or is_vip_user(uid)): return
+        if get_dynamic_masters_count_by_creator(uid) >= 3 and uid not in FOUNDER_USERS:
+            await query.message.reply_text("⚠️ 您的二级主人坑位已满（上限 3 个）。")
             return
         context.user_data['waiting_for_master_id'] = True
         await query.message.reply_text("📝 <b>请输入您想添加的【新机器人主人】的 UID（纯数字）：</b>", parse_mode="HTML")
-        
     elif query.data == "menu_del_master_panel":
-        if not (uid in FOUNDER_USERS or is_vip_user(uid)):
-            await query.message.reply_text("❌ 权限不足。")
-            return
+        if not (uid in FOUNDER_USERS or is_vip_user(uid)): return
         my_masters = get_dynamic_masters_by_creator(uid)
         if not my_masters:
-            await query.message.reply_text("📭 <b>您当前还没有添加过任何二级机器人主人。</b>", parse_mode="HTML")
+            await query.message.reply_text("📭 您当前还没有添加过二级主人。")
             return
-        
-        del_keyboard = []
-        for m_id, m_name in my_masters:
-            del_keyboard.append([InlineKeyboardButton(f"❌ 移除: {m_name} ({m_id})", callback_data=f"execute_del_master_{m_id}")])
+        del_keyboard = [[InlineKeyboardButton(f"❌ 移除: {m_name} ({m_id})", callback_data=f"execute_del_master_{m_id}")] for m_id, m_name in my_masters]
         del_keyboard.append([InlineKeyboardButton("🔙 返回主菜单", callback_data="menu_back_to_lobby")])
-        
-        await query.message.reply_text("⚙️ <b>【移除机器人主控制台】</b>\n请点击下方您想要删除的主人名单，此操作将实时收回其特权：", reply_markup=InlineKeyboardMarkup(del_keyboard), parse_mode="HTML")
-
+        await query.message.reply_text("⚙️ 请点击下方要删除的主人名单：", reply_markup=InlineKeyboardMarkup(del_keyboard), parse_mode="HTML")
     elif query.data.startswith("execute_del_master_"):
         target_mid = int(query.data.split("_")[3])
         conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT added_by FROM dynamic_masters WHERE user_id = ?", (target_mid,))
         row = c.fetchone()
-        
-        if not row:
-            await query.message.reply_text("❌ 找不到该主人记录，可能已被提前删除。")
-            conn.close()
-            return
-            
-        added_by_who = row[0]
-        if uid in FOUNDER_USERS or added_by_who == uid:
+        if row and (uid in FOUNDER_USERS or row[0] == uid):
             c.execute("DELETE FROM dynamic_masters WHERE user_id = ?", (target_mid,))
             conn.commit()
-            await query.message.reply_text(f"✅ <b>移除成功！</b>\n已成功将 UID: <code>{target_mid}</code> 踢出机器人主人白名单，其特权已实时失效。", parse_mode="HTML")
-        else:
-            await query.message.reply_text("❌ <b>越权错误：</b> 您只能移除由您自己亲手添加的机器人主！")
+            await query.message.reply_text(f"✅ 移除成功！")
         conn.close()
         return
-        
     elif query.data == "menu_back_to_lobby":
-        await query.message.edit_text("💡 请使用下方的高级控制面板管理您的记账特权：", reply_markup=get_private_main_keyboard(uid))
+        await query.message.edit_text("💡 请使用控制面板管理特权：", reply_markup=get_private_main_keyboard(uid))
     elif query.data == "menu_help":
         await query.message.reply_text(get_help_text('chinese'), parse_mode="Markdown")
 
-# ==================== 图片/截图拦截处理 ====================
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_type = update.effective_chat.type
+    if update.effective_chat.type != "private": return
     uid = update.effective_user.id
-    username = update.effective_user.first_name or "未知"
-    
-    if update.effective_user:
-        save_user_cache(uid, update.effective_user.username, update.effective_user.first_name)
-        
-    if chat_type != "private": return
-
+    save_user_cache(uid, update.effective_user.username, update.effective_user.first_name)
     photo_file_id = update.message.photo[-1].file_id
     masters = get_all_masters()
-    
     approve_keyboard = [
-        [InlineKeyboardButton("✅ 确认1个月(80)", callback_data=f"img_approve_{uid}_1"), InlineKeyboardButton("✅ 确认2个月(130)", callback_data=f"img_approve_{uid}_2")],
-        [InlineKeyboardButton("✅ 确认3个月(220)", callback_data=f"img_approve_{uid}_3"), InlineKeyboardButton("❌ 拒绝凭证", callback_data=f"img_reject_{uid}")]
+        [InlineKeyboardButton("✅ 确认1个月", callback_data=f"img_approve_{uid}_1"), InlineKeyboardButton("✅ 确认2个月", callback_data=f"img_approve_{uid}_2")],
+        [InlineKeyboardButton("✅ 确认3个月", callback_data=f"img_approve_{uid}_3"), InlineKeyboardButton("❌ 拒绝", callback_data=f"img_reject_{uid}")]
     ]
-    notification_caption = f"📸 <b>【收到买家转账成功图】</b>\n\n👤 <b>买家用户：</b> {username}\n🆔 <b>买家 UID：</b> <code>{uid}</code>"
     for m_id in masters:
-        try: await context.bot.send_photo(chat_id=m_id, photo=photo_file_id, caption=notification_caption, reply_markup=InlineKeyboardMarkup(approve_keyboard), parse_mode="HTML")
+        try: await context.bot.send_photo(chat_id=m_id, photo=photo_file_id, caption=f"📸 <b>【收到转账截图】</b>\n🆔 买家 UID：<code>{uid}</code>", reply_markup=InlineKeyboardMarkup(approve_keyboard), parse_mode="HTML")
         except: pass
-    await update.message.reply_text("📥 <b>收到您的转账成功截图凭证！</b>\n系统已将其提交给创始主人进行多重风控核对，请耐心等待！", parse_mode="HTML")
+    await update.message.reply_text("📥 <b>转账凭证已递交审核！</b>", parse_mode="HTML")
 
-# ==================== 文本逻辑与实时记账 ====================
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     chat_type = update.effective_chat.type
@@ -748,42 +790,29 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if chat_type == "private":
         if context.user_data.get('waiting_for_master_id'):
             context.user_data['waiting_for_master_id'] = False
-            
-            current_count = get_dynamic_masters_count_by_creator(uid)
-            if current_count >= 3 and uid not in FOUNDER_USERS:
-                await update.message.reply_text("⚠️ 您的二级主人坑位已满（上限 3 个），请先移除一个。", parse_mode="HTML")
-                return
-                
             clean_uid = "".join(filter(str.isdigit, text))
             if clean_uid and len(clean_uid) >= 5:
                 target_master_id = int(clean_uid)
-                
                 try:
                     chat_inf = await context.bot.get_chat(target_master_id)
                     target_name = chat_inf.first_name or "二级机器人主"
-                except:
-                    target_name = "二级机器人主"
-                    
+                except: target_name = "二级机器人主"
                 conn = get_db_connection()
                 c = conn.cursor()
                 c.execute("INSERT OR REPLACE INTO dynamic_masters (user_id, username, added_by) VALUES (?, ?, ?)", (target_master_id, target_name, uid))
                 conn.commit()
                 conn.close()
-                await update.message.reply_text(f"🎉 <b>授权成功！</b>\n已将 {target_name} (<code>{target_master_id}</code>) 绑定为您名下的新主人，享有全群通配激活特权！", reply_markup=get_private_main_keyboard(uid), parse_mode="HTML")
-            else: 
-                await update.message.reply_text("❌ UID 格式不正确，请输入纯数字。", reply_markup=get_private_main_keyboard(uid))
+                await update.message.reply_text(f"🎉 授权成功！已经成功绑定 {target_name}", reply_markup=get_private_main_keyboard(uid), parse_mode="HTML")
+            else: await update.message.reply_text("❌ UID 格式错误。", reply_markup=get_private_main_keyboard(uid))
             return
-            
         if len(text) >= 20:
             masters = get_all_masters()
             admin_keyboard = [[InlineKeyboardButton("✅ 确认到账", callback_data=f"admin_approve_{uid}"), InlineKeyboardButton("❌ 拒绝", callback_data=f"admin_reject_{uid}")]]
-            notification = f"🔔 <b>买家付款文本对账通知</b>\n\n👤 买家: {username} (ID: <code>{uid}</code>)\n📝 凭证:\n<code>{text}</code>"
             for m_id in masters:
-                try: await context.bot.send_message(chat_id=m_id, text=notification, reply_markup=InlineKeyboardMarkup(admin_keyboard), parse_mode="HTML")
+                try: await context.bot.send_message(chat_id=m_id, text=f"🔔 付款通知\n🆔 ID: <code>{uid}</code>\n📝 凭证:\n<code>{text}</code>", reply_markup=InlineKeyboardMarkup(admin_keyboard), parse_mode="HTML")
                 except: pass
-            await update.message.reply_text("✅ 文本信息已递交审核！")
+            await update.message.reply_text("✅ 凭证递交审核成功！")
             return
-        await update.message.reply_text("💡 请使用控制面板管理您的特权：", reply_markup=get_private_main_keyboard(uid), parse_mode="HTML")
         return
 
     if text in ['上课', 'အတန်းစ']:
@@ -824,24 +853,19 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if text.startswith('设置操作人') or text.startswith('အော်ပရေတာခန့်ရန်'):
-        if not (is_master(uid) or is_vip_user(uid)):
-            return
-        
+        if not (is_master(uid) or is_vip_user(uid)): return
         target_id = None
         user_show = None
-        
         user_match = re.search(r'@(\w+)', text)
         if user_match:
             raw_username = user_match.group(1)
             target_id, cached_name = get_user_id_by_username(raw_username)
             user_show = cached_name if cached_name else f"@{raw_username}"
-
         if not target_id and update.message.reply_to_message:
             target_id = update.message.reply_to_message.from_user.id
             target_user = update.message.reply_to_message.from_user
             user_show = f"@{target_user.username}" if target_user.username else target_user.first_name
             save_user_cache(target_id, target_user.username, target_user.first_name)
-
         if not target_id:
             num_match = re.search(r'\d{6,}', text)
             if num_match:
@@ -850,7 +874,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     member = await context.bot.get_chat_member(gid, target_id)
                     user_show = f"@{member.user.username}" if member.user.username else member.user.first_name
                 except: user_show = f"用户({target_id})"
-
         if target_id:
             ops = json.loads(get_setting(gid, 'operators') or '[]')
             if target_id not in ops:
@@ -858,7 +881,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 update_setting(gid, 'operators', json.dumps(ops))
             await update.message.reply_text(f"成功设置 {user_show} 成为记账员")
         else:
-            await update.message.reply_text("⚠️ 机器人未抓到该用户UID。请让他先在群里发句话，或者直接回复他任意一条消息发送 `设置操作人` 即可成功绑定！")
+            await update.message.reply_text("⚠️ 未抓到用户，请让他发句话或回复他消息发送 `设置操作人`！")
         return
 
     if text in ['改语言', 'ဘာသာစကား']:
@@ -935,23 +958,19 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         if sign == '-': amt = -amt
         custom_rate = float(m_inc.group(4)) if m_inc.group(4) else None
         ex_rate = custom_rate if custom_rate else (get_setting(gid, 'exchange_rate') or 7.2)
-        
         add_bill(gid, uid, username, rem, amt, 'income', ex_rate)
         await show_full_bill(update, gid)
         return
 
-# ==================== 异步服务启动器 ====================
 def main():
     init_db()
     threading.Thread(target=lambda: flask_app.run(host='0.0.0.0', port=PORT), daemon=True).start()
-    
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-    
-    print("🤖 VIP买家自主可控加固版——智能网页账单链路已修复...")
+    print("🤖 终极解耦无缓存网页账单链路已全面激活...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
