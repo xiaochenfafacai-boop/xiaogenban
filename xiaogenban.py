@@ -13,8 +13,8 @@ import os
 # ==================== 日志与基础配置 ====================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = "8961723870:AAH4HxwwhJB4NfAhdbq2xFiOIU6jz9sZlAA"
-WEB_URL = "https://acai-888gh.onrender.com"
+TOKEN = "8961723870:AAFxPXedpLby6r7dKOourqhM58vc4dh4PQs"
+WEB_URL = "https://acai-888ghj.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
 # 创始超级管理员（分销控制端ID）
