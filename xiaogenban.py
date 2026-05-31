@@ -13,7 +13,7 @@ import os
 # ==================== 日志与基础配置 ====================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = "8961723870:AAEGnJu7Uukb_fR7V1PYj86SUBgWvhf2Cjg"
+TOKEN = "8961723870:AAFuh1A5IesPrk8U8xLsl68O5teE-Hr5-sg"
 WEB_URL = "https://xiaogenban-888gh.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
