@@ -13,11 +13,11 @@ import os
 # ==================== 日志与基础配置 ====================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = "8961723870:AAEBJXkrPUgK7jRcxz5Lkya5utmsUPF5D2Y"
+TOKEN = "8961723870:AAFmmDMS_Cn69gvEpT5mlDfPD1zrbaVUS6I"
 WEB_URL = "https://xiaogenban-886ghj.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
-# 创始超级管理员（分销控制端ID）
+# 创始超级管理员（最高控制端ID，永远不可被普通买家删除）
 FOUNDER_USERS = [8179896441]
 
 # 销售收款与三档阶梯价格配置
@@ -104,7 +104,7 @@ def get_current_time(timezone_str):
         now = datetime.now(tz)
         return now, now.strftime("%H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
 
-# ==================== 商业权限判定系统 (核心：去管理化，只认白名单ID) ====================
+# ==================== 商业权限判定系统 ====================
 def get_all_masters():
     masters = list(FOUNDER_USERS)
     try:
@@ -122,18 +122,26 @@ def get_all_masters():
 def is_master(user_id):
     return user_id in get_all_masters()
 
-def get_dynamic_masters_count():
+def get_dynamic_masters_by_creator(creator_id):
+    """获取某个买家/创始人添加的所有二级主人列表"""
     try:
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM dynamic_masters")
-        count = c.fetchone()[0]
+        # 如果是创始人，允许看并管理所有动态加入的主人
+        if creator_id in FOUNDER_USERS:
+            c.execute("SELECT user_id, username FROM dynamic_masters")
+        else:
+            c.execute("SELECT user_id, username FROM dynamic_masters WHERE added_by = ?", (creator_id,))
+        rows = c.fetchall()
         conn.close()
-        return count
-    except: return 0
+        return rows
+    except: return []
+
+def get_dynamic_masters_count_by_creator(creator_id):
+    return len(get_dynamic_masters_by_creator(creator_id))
 
 def is_vip_user(user_id):
-    if is_master(user_id): return True
+    if user_id in FOUNDER_USERS: return True
     try:
         conn = get_db_connection()
         c = conn.cursor()
@@ -147,7 +155,6 @@ def is_vip_user(user_id):
     return False
 
 def can_use(group_id, user_id):
-    """不论机器人是不是管理员，也不管是谁的群，只要说话的人在白名单里，就可以操作"""
     if is_master(user_id) or is_vip_user(user_id): return True
     try:
         ops = json.loads(get_setting(group_id, 'operators') or '[]')
@@ -271,7 +278,7 @@ def delete_user_bills(group_id, name):
     conn.close()
     return deleted
 
-# ==================== Web 网页端与安全数据前端 API ====================
+# ==================== Web 网页端页面 ====================
 @flask_app.route('/')
 def index():
     return '''
@@ -487,15 +494,24 @@ async def show_full_bill(update: Update, gid):
     elif update.callback_query:
         await update.callback_query.message.reply_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ==================== 私聊销售控制台键盘 ====================
-def get_private_main_keyboard():
+# ==================== 私聊高级控制台键盘 ====================
+def get_private_main_keyboard(user_id):
     keyboard = [
         [InlineKeyboardButton("💰 充值续费套餐", callback_data="menu_renew"),
-         InlineKeyboardButton("📅 检查到期时间", callback_data="menu_expire")],
-        [InlineKeyboardButton("👑 添加新机器人主人", callback_data="menu_add_master"),
-         InlineKeyboardButton("📖 机器人使用指南", callback_data="menu_help")],
-        [InlineKeyboardButton("🌐 访问账单网页端", url=WEB_URL)]
+         InlineKeyboardButton("📅 检查到期时间", callback_data="menu_expire")]
     ]
+    
+    # 只有买家或超级创始人才显示主人授权控制功能
+    if is_vip_user(user_id) or user_id in FOUNDER_USERS:
+        keyboard.append([
+            InlineKeyboardButton("👑 添加机器人主", callback_data="menu_add_master"),
+            InlineKeyboardButton("❌ 取掉机器人主", callback_data="menu_del_master_panel")
+        ])
+        
+    keyboard.append([
+        InlineKeyboardButton("📖 使用指南", callback_data="menu_help"),
+        InlineKeyboardButton("🌐 账单网页端", url=WEB_URL)
+    ])
     return InlineKeyboardMarkup(keyboard)
 
 def get_renew_text():
@@ -519,12 +535,13 @@ def get_renew_text():
 
 # ==================== 核心网关分流交互处理器 ====================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
     if update.effective_chat.type == "private":
         welcome_text = (
             f"👋 您好，<b>{update.effective_user.first_name}</b>！欢迎使用智能记账多群分销版后台管理大厅。\n\n"
             f"💡 请使用下方的高级控制面板管理您的记账特权、绑定新主人或查看账单："
         )
-        await update.message.reply_text(welcome_text, reply_markup=get_private_main_keyboard(), parse_mode="HTML")
+        await update.message.reply_text(welcome_text, reply_markup=get_private_main_keyboard(uid), parse_mode="HTML")
     else:
         await update.message.reply_text("📊 记账机器人已在群组就绪！白名单用户/操作人请输入 <code>上课</code> 开启记账。私聊我可进入充值大厅。", parse_mode="HTML")
 
@@ -539,6 +556,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("❌ 您没有权限点击此机器人的操作按钮", show_alert=True)
             return
 
+    # 快捷审核图片
     if query.data.startswith("img_approve_"):
         parts = query.data.split("_")
         target_uid = int(parts[2])
@@ -581,6 +599,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         except: pass
         return
 
+    # 快捷审核文本
     if query.data.startswith("admin_approve_"):
         target_uid = int(query.data.split("_")[2])
         conn = get_db_connection()
@@ -603,6 +622,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         except: pass
         return
 
+    # 按钮分流面板
     if query.data == 'show_help':
         lang = get_setting(gid, 'language') or 'chinese'
         keyboard = [[InlineKeyboardButton("🔙 返回记账 (Back)", callback_data='back_to_main')]]
@@ -632,20 +652,64 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         elif row: status_text = f"📅 <b>特权到期时间：</b> <code>{row[0]}</code>\n💡 有效期内可在任意群内正常上课记账。"
         else: status_text = "⚠️ <b>特权状态：</b> 您当前尚未开通多群包月VIP资格，请点击充值续费。"
         await query.message.reply_text(status_text, parse_mode="HTML")
+        
     elif query.data == "menu_add_master":
-        if not (is_master(uid) or is_vip_user(uid)):
-            await query.message.reply_text("❌ 抱歉，您当前还没有购买本机器人，无权添加新的机器人主人。")
+        if not (uid in FOUNDER_USERS or is_vip_user(uid)):
+            await query.message.reply_text("❌ 抱歉，您当前还没有开通多群VIP特权，无权添加新的机器人主人。")
             return
-        if get_dynamic_masters_count() >= 3:
-            await query.message.reply_text("⚠️ <b>系统提示：授权失败</b>\n本机器人当前最多只能添加 3 个二级机器人主人账号。", parse_mode="HTML")
+        current_count = get_dynamic_masters_count_by_creator(uid)
+        if current_count >= 3 and uid not in FOUNDER_USERS:
+            await query.message.reply_text("⚠️ <b>系统提示：授权失败</b>\n您名下的二级机器人主人已经开满 3 个，请先移除一个后再行添加。", parse_mode="HTML")
             return
         context.user_data['waiting_for_master_id'] = True
-        guide_text = "📝 <b>请输入您想添加的【新机器人主人】的 UID（纯数字）：</b>"
-        await query.message.reply_text(guide_text, parse_mode="HTML")
+        await query.message.reply_text("📝 <b>请输入您想添加的【新机器人主人】的 UID（纯数字）：</b>", parse_mode="HTML")
+        
+    elif query.data == "menu_del_master_panel":
+        # 调出“取掉机器人主”的直观列表面板
+        if not (uid in FOUNDER_USERS or is_vip_user(uid)):
+            await query.message.reply_text("❌ 权限不足。")
+            return
+        my_masters = get_dynamic_masters_by_creator(uid)
+        if not my_masters:
+            await query.message.reply_text("📭 <b>您当前还没有添加过任何二级机器人主人。</b>", parse_mode="HTML")
+            return
+        
+        del_keyboard = []
+        for m_id, m_name in my_masters:
+            del_keyboard.append([InlineKeyboardButton(f"❌ 移除: {m_name} ({m_id})", callback_data=f"execute_del_master_{m_id}")])
+        del_keyboard.append([InlineKeyboardButton("🔙 返回主菜单", callback_data="menu_back_to_lobby")])
+        
+        await query.message.reply_text("⚙️ <b>【移除机器人主控制台】</b>\n请点击下方您想要删除的主人名单，此操作将实时收回其特权：", reply_markup=InlineKeyboardMarkup(del_keyboard), parse_mode="HTML")
+
+    elif query.data.startswith("execute_del_master_"):
+        target_mid = int(query.data.split("_")[3])
+        # 安全验证：判断要删除的这个人，是不是当前操作人自己添加的（创始人无视限制）
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT added_by FROM dynamic_masters WHERE user_id = ?", (target_mid,))
+        row = c.fetchone()
+        
+        if not row:
+            await query.message.reply_text("❌ 找不到该主人记录，可能已被提前删除。")
+            conn.close()
+            return
+            
+        added_by_who = row[0]
+        if uid in FOUNDER_USERS or added_by_who == uid:
+            c.execute("DELETE FROM dynamic_masters WHERE user_id = ?", (target_mid,))
+            conn.commit()
+            await query.message.reply_text(f"✅ <b>移除成功！</b>\n已成功将 UID: <code>{target_mid}</code> 踢出机器人主人白名单，其特权已实时失效。", parse_mode="HTML")
+        else:
+            await query.message.reply_text("❌ <b>越权错误：</b> 您只能移除由您自己亲手添加的机器人主！")
+        conn.close()
+        return
+        
+    elif query.data == "menu_back_to_lobby":
+        await query.message.edit_text("💡 请使用下方的高级控制面板管理您的记账特权：", reply_markup=get_private_main_keyboard(uid))
     elif query.data == "menu_help":
         await query.message.reply_text(get_help_text('chinese'), parse_mode="Markdown")
 
-# ==================== 图片/截图拦截与自动处理 ====================
+# ==================== 图片/截图拦截处理 ====================
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.effective_chat.type
     uid = update.effective_user.id
@@ -669,7 +733,7 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         except: pass
     await update.message.reply_text("📥 <b>收到您的转账成功截图凭证！</b>\n系统已将其提交给创始主人进行多重风控核对，请耐心等待！", parse_mode="HTML")
 
-# ==================== 核心消息拦截与记账运算处理器 ====================
+# ==================== 文本逻辑与实时记账 ====================
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     chat_type = update.effective_chat.type
@@ -680,24 +744,37 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.effective_user:
         save_user_cache(uid, update.effective_user.username, update.effective_user.first_name)
 
-    # 1. 私聊管理后台逻辑
+    # 1. 私聊管理
     if chat_type == "private":
         if context.user_data.get('waiting_for_master_id'):
             context.user_data['waiting_for_master_id'] = False
-            if get_dynamic_masters_count() >= 3:
-                await update.message.reply_text("⚠️ 主人坑位已满（上限 3 个）。", parse_mode="HTML")
+            
+            current_count = get_dynamic_masters_count_by_creator(uid)
+            if current_count >= 3 and uid not in FOUNDER_USERS:
+                await update.message.reply_text("⚠️ 您的二级主人坑位已满（上限 3 个），请先移除一个。", parse_mode="HTML")
                 return
+                
             clean_uid = "".join(filter(str.isdigit, text))
             if clean_uid and len(clean_uid) >= 5:
                 target_master_id = int(clean_uid)
+                
+                # 抓取一下这个UID叫什么名字，没有就写“备用机器人主”
+                try:
+                    chat_inf = await context.bot.get_chat(target_master_id)
+                    target_name = chat_inf.first_name or "二级机器人主"
+                except:
+                    target_name = "二级机器人主"
+                    
                 conn = get_db_connection()
                 c = conn.cursor()
-                c.execute("INSERT OR REPLACE INTO dynamic_masters (user_id, username, added_by) VALUES (?, ?, ?)", (target_master_id, "新绑定的主人", uid))
+                c.execute("INSERT OR REPLACE INTO dynamic_masters (user_id, username, added_by) VALUES (?, ?, ?)", (target_master_id, target_name, uid))
                 conn.commit()
                 conn.close()
-                await update.message.reply_text(f"🎉 <b>授权成功！</b>\n已将 <code>{target_master_id}</code> 设置为机器人新主人！", parse_mode="HTML")
-            else: await update.message.reply_text("❌ UID 格式不正确。")
+                await update.message.reply_text(f"🎉 <b>授权成功！</b>\n已将 {target_name} (<code>{target_master_id}</code>) 绑定为您名下的新主人，享有全群通配激活特权！", reply_markup=get_private_main_keyboard(uid), parse_mode="HTML")
+            else: 
+                await update.message.reply_text("❌ UID 格式不正确，请输入纯数字。", reply_markup=get_private_main_keyboard(uid))
             return
+            
         if len(text) >= 20:
             masters = get_all_masters()
             admin_keyboard = [[InlineKeyboardButton("✅ 确认到账", callback_data=f"admin_approve_{uid}"), InlineKeyboardButton("❌ 拒绝", callback_data=f"admin_reject_{uid}")]]
@@ -707,7 +784,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 except: pass
             await update.message.reply_text("✅ 文本信息已递交审核！")
             return
-        await update.message.reply_text("💡 请使用控制面板管理您的特权：", reply_markup=get_private_main_keyboard(), parse_mode="HTML")
+        await update.message.reply_text("💡 请使用控制面板管理您的特权：", reply_markup=get_private_main_keyboard(uid), parse_mode="HTML")
         return
 
     # 2. 群组指令：上课
@@ -750,7 +827,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(message)
         return
 
-    # 5. 群组指令：设置操作人 (解绑群主/管理权限依赖，有VIP即可授权)
+    # 5. 群组指令：设置操作人
     if text.startswith('设置操作人') or text.startswith('အော်ပရေတာခန့်ရန်'):
         if not (is_master(uid) or is_vip_user(uid)):
             return
@@ -789,7 +866,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⚠️ 机器人未抓到该用户UID。请让他先在群里发句话，或者直接回复他任意一条消息发送 `设置操作人` 即可成功绑定！")
         return
 
-    # 6. 群组指令：语言切换
+    # 6. 群组指令：改语言
     if text in ['改语言', 'ဘာသာစကား']:
         if not can_use(gid, uid): return
         current = get_setting(gid, 'language') or 'chinese'
@@ -799,7 +876,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(msg)
         return
 
-    # 7. 群组指令：删除命令系列
+    # 7. 群组指令：删除系列
     if text in ['删今天', 'ယနေ့ဖျက်']:
         if not can_use(gid, uid): return
         delete_today_bills(gid)
@@ -818,7 +895,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("✅ 已清空全量总历史账单")
         return
 
-    # 8. 群组指令：汇率及时区微调
+    # 8. 群组指令：设置汇率、时区
     m_rate = re.match(r'^(?:设置汇率|ငွေလဲနှုန်း)\s+(\d+(?:\.\d+)?)$', text)
     if m_rate:
         if not can_use(gid, uid): return
@@ -883,7 +960,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     
-    print("🤖 零管理权限依赖版——智能多群记账系统已加固部署...")
+    print("🤖 VIP买家自主可控版——智能多群记账系统已部署...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
