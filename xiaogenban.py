@@ -13,8 +13,8 @@ import os
 # ==================== 日志与基础配置 ====================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = "8961723870:AAFmmDMS_Cn69gvEpT5mlDfPD1zrbaVUS6I"
-WEB_URL = "https://xiaogenban-886ghj.onrender.com"
+TOKEN = "8961723870:AAFhyYhmUe_do4E74MOyMqq8gXbPTN9jbaQ"
+WEB_URL = "https://xiaogenban-8866hg.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
 # 创始超级管理员（最高控制端ID，永远不可被普通买家删除）
