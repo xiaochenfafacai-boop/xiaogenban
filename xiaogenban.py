@@ -14,7 +14,7 @@ import os
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = "8961723870:AAFxPXedpLby6r7dKOourqhM58vc4dh4PQs"
-WEB_URL = "https://acai-888ghj.onrender.com"
+WEB_URL = "https://xiaogenban-888ghj.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
 # 创始超级管理员（分销控制端ID）
