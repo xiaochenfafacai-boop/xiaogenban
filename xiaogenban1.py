@@ -19,9 +19,9 @@ PORT = int(os.environ.get('PORT', 8080))
 
 FOUNDER_USERS = [8179896441]
 TRON_ADDRESS = "TVnjLwDrGjYVRTa1ukfoE2mFTmCxtrjoCw"
-PRICE_1_MONTH = 80   
-PRICE_2_MONTH = 130  
-PRICE_3_MONTH = 220  
+PRICE_1_MONTH = 80
+PRICE_2_MONTH = 130
+PRICE_3_MONTH = 220
 
 TIMEZONES = {
     'china': 'Asia/Shanghai',
@@ -186,14 +186,14 @@ def add_bill(group_id, user_id, username, remark, amount, bill_type, exchange_ra
         usdt_amount = amount / exchange_rate
     else:
         usdt_amount = amount
-        
+
     tz_str = get_setting(group_id, 'timezone') or 'Asia/Shanghai'
     now, _, full_time = get_current_time(tz_str)
     date_str = now.strftime("%Y-%m-%d")
-    
+
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''INSERT INTO bills 
+    c.execute('''INSERT INTO bills 
                  (group_id, user_id, username, remark, amount, usdt_amount, exchange_rate, bill_type, timestamp, date_str, is_settled)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)''',
               (group_id, user_id, username, remark, amount, usdt_amount, exchange_rate, bill_type, full_time, date_str))
@@ -267,7 +267,7 @@ def delete_user_bills(group_id, name):
     conn.close()
     return deleted
 
-# ==================== 终极重构 Web 前端页面 ====================
+# ==================== 强效去缓存 Web 前端 ====================
 @flask_app.route('/')
 def index():
     return '''
@@ -357,10 +357,10 @@ def index():
                 try {
                     const timestamp = new Date().getTime();
                     const targetUrl = `/api/bill?group_id=${encodeURIComponent(currentGroupId)}&date=${currentSelectedDate}&_t=${timestamp}`;
-                    
+
                     const response = await fetch(targetUrl);
                     const data = await response.json();
-                    
+
                     if (data.error) {
                         document.getElementById('content').innerHTML = `<div class="loading" style="color:red;">❌ 系统加载异常: ${data.msg}</div>`;
                         return;
@@ -449,21 +449,21 @@ def api_bill():
             group_id = int(group_id_str)
         except:
             group_id = 0
-            
+
         tz_str = get_setting(group_id, 'timezone') or 'Asia/Shanghai'
         now, _, _ = get_current_time(tz_str)
         today_str = now.strftime("%Y-%m-%d")
         target_date = request.args.get('date', default=today_str)
-        
+
         income, expense, total_income, total_expense = get_class_bills_by_date(group_id, target_date)
         rate = get_setting(group_id, 'exchange_rate') or 7.2
         fee_rate = get_setting(group_id, 'fee_rate') or 0
         show_usdt = get_setting(group_id, 'show_usdt') or 1
-        
+
         total_rmb = total_income[0] if (total_income and total_income[0]) else 0
         total_usdt = total_income[1] if (total_income and total_income[1]) else 0
         expense_usdt = total_expense[0] if (total_expense and total_expense[0]) else 0
-        
+
         income_bills = []
         expense_bills = []
         for row in income:
@@ -482,11 +482,11 @@ def api_bill():
         for row in c.fetchall():
             remark_stats.append({'remark': row[0] if row[0] else '无备注', 'count': row[1] or 0, 'amount': f"{row[2] or 0:.0f}", 'usdt': f"{row[3] or 0:.2f}"})
         conn.close()
-        
+
         res = jsonify({
-            'exchange_rate': f"{rate:.2f}", 'fee_rate': f"{fee_rate:.0f}", 'total_rmb': f"{total_rmb:.0f}", 
-            'total_usdt': f"{total_usdt:.2f}", 'expense_usdt': f"{expense_usdt:.2f}", 
-            'remaining_usdt': f"{total_usdt - expense_usdt:.2f}", 'show_usdt': int(show_usdt), 
+            'exchange_rate': f"{rate:.2f}", 'fee_rate': f"{fee_rate:.0f}", 'total_rmb': f"{total_rmb:.0f}", 
+            'total_usdt': f"{total_usdt:.2f}", 'expense_usdt': f"{expense_usdt:.2f}", 
+            'remaining_usdt': f"{total_usdt - expense_usdt:.2f}", 'show_usdt': int(show_usdt), 
             'income_bills': income_bills, 'expense_bills': expense_bills, 'remark_stats': remark_stats
         })
         res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -514,7 +514,7 @@ def get_help_text(lang):
 `အတန်းစ` / `上课` - SaYinKoing Sinit PhwintChin
 `အတန်းဆင်း` / `下课` - SaYinPate Pyee ShinLinChin
 `ငွေလဲနှုန်း 7.2` / `设置汇率 7.2` - ThatMatRanyan
-`အော်ပရေတာခန့်ရန် @username` / `设置操作人 @username` - KhantRanyan 
+`အော်ပရေတာခန့်ရန် @username` / `设置操作人 @username` - KhantRanyan 
 `အော်ပရေတာစာရင်း` / `查看操作员列表` - KyiRanyan
 `ဘာသာစကား` / `改语言` - PyaungRanyan (中文/မြန်မာ)
 `အချိန်သတ်မှတ်` / `设置时间` - AChainZone PyaungRanyan
@@ -551,7 +551,7 @@ def get_bill_content(income, expense, total_rmb, total_usdt, expense_usdt, rate,
         income_title, expense_title, rate_text, total_text, exp_text, rem_text = "📥 ငွေဝင်", "📤 ထုတ်ငွေ", "💰 လဲနှုန်း", "📊 စုစုပေါင်း", "📊 ထုတ်ပြီး", "📊 ကျန်ငွေ"
     else:
         income_title, expense_title, rate_text, total_text, exp_text, rem_text = "📥 入款", "📤 下发", "💰 汇率", "📊 总入款", "📊 已下发", "📊 未下发"
-        
+
     message = f"📊 账单汇总 ({today_date})\n\n"
     if income:
         message += f"{income_title}:\n"
@@ -569,7 +569,7 @@ def get_bill_content(income, expense, total_rmb, total_usdt, expense_usdt, rate,
             rem_str = f"【{remark}】" if remark else ""
             message += f"  {time_short} {rem_str}{usdt or 0:.1f}{unit}\n"
         message += "\n"
-        
+
     message += f"{rate_text}: {rate:.2f}\n"
     message += f"{total_text}: {total_rmb:.0f} | {total_usdt:.1f}{unit}\n"
     message += f"{exp_text}: {expense_usdt:.1f}{unit}\n"
@@ -580,14 +580,14 @@ async def show_full_bill(update: Update, gid):
     tz_str = get_setting(gid, 'timezone') or 'Asia/Shanghai'
     now, _, _ = get_current_time(tz_str)
     today_date = now.strftime("%Y-%m-%d")
-    
+
     income, expense, total_income, total_expense = get_class_bills_by_date(gid, today_date)
     rate = get_setting(gid, 'exchange_rate') or 7.2
     lang = get_setting(gid, 'language') or 'chinese'
     total_rmb = total_income[0] or 0
     total_usdt = total_income[1] or 0
     expense_usdt = total_expense[0] or 0
-    
+
     message = get_bill_content(income, expense, total_rmb, total_usdt, expense_usdt, rate, today_date, lang)
     keyboard = [
         [InlineKeyboardButton("📊 完整账单 (Web)", url=f"{WEB_URL}?group_id={gid}")],
@@ -719,7 +719,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         c.execute("SELECT expire_time FROM vip_users WHERE user_id = ?", (uid,))
         row = c.fetchone()
         conn.close()
-        if uid in FOUNDER_USERS: status_text = "📅 ⚖  创始人账户（永久有效）"
+        if uid in FOUNDER_USERS: status_text = "📅 ⚖ 创始人账户（永久有效）"
         elif row: status_text = f"📅 VIP到期时间：<code>{row[0]}</code>"
         else: status_text = "⚠️ 当前尚未开通独立记账多群版VIP资格。"
         await query.message.reply_text(status_text, parse_mode="HTML")
@@ -964,7 +964,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-    print("🤖 独立子分销版本：无缓存极速网页账单链路已全面激活...")
+    print("🤖 独立子分销版本：净化版无缓存极速网页账单链路全面激活...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
