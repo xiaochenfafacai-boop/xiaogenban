@@ -13,8 +13,8 @@ import os
 # ==================== 日志与基础配置 ====================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = "8961723870:AAEM7urgrTIz_ZYljLj317YN5PHr5SJm_ew"
-WEB_URL = "https://xiaogenban-6688hgj.onrender.com"
+TOKEN = "8961723870:AAHK1RoOHnhS9wVWmZ4DMYctZ0OlwtzWpKY"
+WEB_URL = "https://xiaogenban-666kty.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
 FOUNDER_USERS = [8179896441]
@@ -267,7 +267,7 @@ def delete_user_bills(group_id, name):
     conn.close()
     return deleted
 
-# ==================== 终极重构 Web 前端页面 (破除缓存与精准匹配) ====================
+# ==================== 终极重构 Web 前端页面 ====================
 @flask_app.route('/')
 def index():
     return '''
@@ -326,7 +326,6 @@ def index():
             let currentGroupId = "";
             let currentSelectedDate = "";
 
-            // 终极修复：使用最高优先级正则表达式完美抓取 group_id 的正负数字
             function initParam() {
                 const match = window.location.href.match(/[?&]group_id=([^&#]*)/);
                 if (match && match[1]) {
@@ -356,7 +355,6 @@ def index():
             async function loadData() {
                 if (!currentGroupId) return;
                 try {
-                    // 双重保险：引入 _t= 毫秒级时间戳，彻底打破各大手机浏览器以及 Render 节点的强制页面缓存
                     const timestamp = new Date().getTime();
                     const targetUrl = `/api/bill?group_id=${encodeURIComponent(currentGroupId)}&date=${currentSelectedDate}&_t=${timestamp}`;
                     
@@ -368,7 +366,6 @@ def index():
                         return;
                     }
 
-                    // 即使没有数据，也把整个表格框架和统计面板渲染出来，告别死板的单行提示
                     let suffix = data.show_usdt ? ' U' : '';
                     let html = '';
 
@@ -426,7 +423,6 @@ def index():
                 }
             }
 
-            // 初始化入口并开启无缝毫秒级数据通道轮询
             if (initParam()) {
                 loadData();
                 setInterval(() => {
@@ -435,7 +431,6 @@ def index():
                     let d = t.getDate();
                     if (m < 10) m = '0' + m;
                     if (d < 10) d = '0' + d;
-                    // 仅在查询当天账单时开启无感知静默自动刷新
                     if (currentSelectedDate === `${t.getFullYear()}-${m}-${d}`) {
                         loadData();
                     }
@@ -488,7 +483,6 @@ def api_bill():
             remark_stats.append({'remark': row[0] if row[0] else '无备注', 'count': row[1] or 0, 'amount': f"{row[2] or 0:.0f}", 'usdt': f"{row[3] or 0:.2f}"})
         conn.close()
         
-        # 显式加入不缓存头部响应
         res = jsonify({
             'exchange_rate': f"{rate:.2f}", 'fee_rate': f"{fee_rate:.0f}", 'total_rmb': f"{total_rmb:.0f}", 
             'total_usdt': f"{total_usdt:.2f}", 'expense_usdt': f"{expense_usdt:.2f}", 
@@ -628,9 +622,9 @@ def get_renew_text():
 🟡 <b>2 个月：</b> <code>{PRICE_2_MONTH} USDT</code>
 🟢 <b>3 个月：</b> <code>{PRICE_3_MONTH} USDT</code>
 
-📌 <b>收款地址：</b>
+📌 <b>收款地址 (TRC-20)：</b>
 👉 <code>{TRON_ADDRESS}</code> <i>(点击自动复制)</i>
-转账成功后请发<b>转账截图</b>到本私料！
+转账成功后请发<b>转账截图</b>到本私聊！
 """
 
 # ==================== 核心网关交互 ====================
@@ -725,7 +719,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         c.execute("SELECT expire_time FROM vip_users WHERE user_id = ?", (uid,))
         row = c.fetchone()
         conn.close()
-        if uid in FOUNDER_USERS: status_text = "📅 ⚖️ 创始人账户（永久有效）"
+        if uid in FOUNDER_USERS: status_text = "📅 ⚖  创始人账户（永久有效）"
         elif row: status_text = f"📅 VIP到期时间：<code>{row[0]}</code>"
         else: status_text = "⚠️ 当前尚未开通独立记账多群版VIP资格。"
         await query.message.reply_text(status_text, parse_mode="HTML")
@@ -970,7 +964,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-    print("🤖 终极解耦无缓存网页账单链路已全面激活...")
+    print("🤖 独立子分销版本：无缓存极速网页账单链路已全面激活...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
