@@ -13,8 +13,8 @@ import os
 # ==================== 日志与基础配置 ====================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = "8961723870:AAFuh1A5IesPrk8U8xLsl68O5teE-Hr5-sg"
-WEB_URL = "https://xiaogenban-888gh.onrender.com"
+TOKEN = "8961723870:AAH4HxwwhJB4NfAhdbq2xFiOIU6jz9sZlAA"
+WEB_URL = "https://acai-888gh.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
 # 创始超级管理员（分销控制端ID）
@@ -34,13 +34,8 @@ TIMEZONES = {
 
 flask_app = Flask(__name__)
 
-# ==================== 数据库安全连接引擎 (核心加固) ====================
+# ==================== 数据库安全连接引擎 (WAL高并发防锁) ====================
 def get_db_connection():
-    """
-    高并发企业级连接器：
-    1. 增加 60 秒无响应排队等待，彻底杜绝 Database Locked 锁表异常
-    2. 开启 WAL (Write-Ahead Logging) 模式，允许多人同时记账、同时高频刷新网页不卡顿
-    """
     conn = sqlite3.connect('bot_data.db', timeout=60.0)
     conn.execute('PRAGMA journal_mode=WAL;')
     conn.execute('PRAGMA synchronous=NORMAL;')
@@ -49,23 +44,18 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    # 群组设置表
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (group_id INTEGER PRIMARY KEY, operators TEXT DEFAULT '[]', exchange_rate REAL DEFAULT 7.2,
                   fee_rate REAL DEFAULT 0, is_active INTEGER DEFAULT 0, language TEXT DEFAULT 'chinese',
                   timezone TEXT DEFAULT 'Asia/Shanghai', show_usdt INTEGER DEFAULT 1)''')
-    # 账单明细表
     c.execute('''CREATE TABLE IF NOT EXISTS bills
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER, user_id INTEGER, username TEXT,
                   remark TEXT, amount REAL, usdt_amount REAL, exchange_rate REAL, bill_type TEXT,
                   timestamp TEXT, date_str TEXT, is_settled INTEGER DEFAULT 0)''')
-    # 购买了特权的包月买家表
     c.execute('''CREATE TABLE IF NOT EXISTS vip_users
                  (user_id INTEGER PRIMARY KEY, username TEXT, expire_time TEXT)''')
-    # 动态绑定的多群代理二级主人表
     c.execute('''CREATE TABLE IF NOT EXISTS dynamic_masters
                  (user_id INTEGER PRIMARY KEY, username TEXT, added_by INTEGER)''')
-    # 偷偷自动抓取的全群 UID 映射表
     c.execute('''CREATE TABLE IF NOT EXISTS user_caches
                  (username_lower TEXT PRIMARY KEY, user_id INTEGER, display_name TEXT)''')
     conn.commit()
@@ -73,7 +63,6 @@ def init_db():
 
 # ==================== 成员 UID 自动拦截与反查缓存 ====================
 def save_user_cache(user_id, username, first_name):
-    """只要有人冒泡，立刻强行记忆其UID，确保 @ 授权随时可用"""
     if not username:
         return
     username_lower = username.lower()
@@ -89,7 +78,6 @@ def save_user_cache(user_id, username, first_name):
         logging.error(f"UID安全抓取异常: {e}")
 
 def get_user_id_by_username(username_str):
-    """通过缓存表反查用户UID"""
     if not username_str:
         return None, None
     username_lower = username_str.replace('@', '').strip().lower()
@@ -116,9 +104,8 @@ def get_current_time(timezone_str):
         now = datetime.now(tz)
         return now, now.strftime("%H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
 
-# ==================== 商业权限判定系统 ====================
+# ==================== 商业权限判定系统 (核心：去管理化，只认白名单ID) ====================
 def get_all_masters():
-    """获取包含创办人与授权新主人的总大老板名单"""
     masters = list(FOUNDER_USERS)
     try:
         conn = get_db_connection()
@@ -146,7 +133,6 @@ def get_dynamic_masters_count():
     except: return 0
 
 def is_vip_user(user_id):
-    """判定买家特权是否在有效期内"""
     if is_master(user_id): return True
     try:
         conn = get_db_connection()
@@ -161,7 +147,7 @@ def is_vip_user(user_id):
     return False
 
 def can_use(group_id, user_id):
-    """鉴权：只有老板、包月买家、以及被授权的群操作人允许触发记账逻辑"""
+    """不论机器人是不是管理员，也不管是谁的群，只要说话的人在白名单里，就可以操作"""
     if is_master(user_id) or is_vip_user(user_id): return True
     try:
         ops = json.loads(get_setting(group_id, 'operators') or '[]')
@@ -347,7 +333,6 @@ def index():
                     document.getElementById('content').innerHTML = html;
                 } catch (err) { document.getElementById('content').innerHTML = '<div class="loading">❌ 数据解析错误或网络异常</div>'; }
             }
-            // 💡 网页轮询间隔提速至 2.5 秒，保证账目一出，网页立刻刷出
             if (getGroupID()) { loadData(); setInterval(() => { const t = new Date(); let m = t.getMonth() + 1; let d = t.getDate(); if (m < 10) m = '0' + m; if (d < 10) d = '0' + d; if (currentSelectedDate === `${t.getFullYear()}-${m}-${d}`) { loadData(); } }, 2500); }
         </script>
     </body>
@@ -541,7 +526,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(welcome_text, reply_markup=get_private_main_keyboard(), parse_mode="HTML")
     else:
-        await update.message.reply_text("📊 记账机器人已在群组就绪！包月买家请输入 <code>上课</code> 开启记账。私聊我可进入充值大厅。", parse_mode="HTML")
+        await update.message.reply_text("📊 记账机器人已在群组就绪！白名单用户/操作人请输入 <code>上课</code> 开启记账。私聊我可进入充值大厅。", parse_mode="HTML")
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -554,7 +539,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("❌ 您没有权限点击此机器人的操作按钮", show_alert=True)
             return
 
-    # 快捷发图自动续费判定
     if query.data.startswith("img_approve_"):
         parts = query.data.split("_")
         target_uid = int(parts[2])
@@ -762,34 +746,30 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 member = await context.bot.get_chat_member(gid, oid)
                 user_show = f"@{member.user.username}" if member.user.username else member.user.first_name
                 message += f"  • {user_show}\n"
-            except: message += f"  • 记账员\n"
+            except: message += f"  • 记账员 (ID: {oid})\n"
         await update.message.reply_text(message)
         return
 
-    # 5. 群组指令：设置操作人 (免回复高智商抓取)
+    # 5. 群组指令：设置操作人 (解绑群主/管理权限依赖，有VIP即可授权)
     if text.startswith('设置操作人') or text.startswith('အော်ပရေတာခန့်ရန်'):
         if not (is_master(uid) or is_vip_user(uid)):
-            await update.message.reply_text("❌ 只有已激活VIP的群主有权限设定本群操作人。")
             return
         
         target_id = None
         user_show = None
         
-        # 优先从消息中的艾特提取
         user_match = re.search(r'@(\w+)', text)
         if user_match:
             raw_username = user_match.group(1)
             target_id, cached_name = get_user_id_by_username(raw_username)
             user_show = cached_name if cached_name else f"@{raw_username}"
 
-        # 其次从回复消息中提取
         if not target_id and update.message.reply_to_message:
             target_id = update.message.reply_to_message.from_user.id
             target_user = update.message.reply_to_message.from_user
             user_show = f"@{target_user.username}" if target_user.username else target_user.first_name
             save_user_cache(target_id, target_user.username, target_user.first_name)
 
-        # 最后尝试匹配纯数字UID
         if not target_id:
             num_match = re.search(r'\d{6,}', text)
             if num_match:
@@ -797,7 +777,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 try:
                     member = await context.bot.get_chat_member(gid, target_id)
                     user_show = f"@{member.user.username}" if member.user.username else member.user.first_name
-                except: user_show = "指定操作员"
+                except: user_show = f"用户({target_id})"
 
         if target_id:
             ops = json.loads(get_setting(gid, 'operators') or '[]')
@@ -806,7 +786,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 update_setting(gid, 'operators', json.dumps(ops))
             await update.message.reply_text(f"成功设置 {user_show} 成为记账员")
         else:
-            await update.message.reply_text("⚠️ 该用户还未在群里发过言，机器人暂时没能抓到他的UID。请让他发个言，或者直接回复他任意一条消息发送 `设置操作人` 即可成功绑定！")
+            await update.message.reply_text("⚠️ 机器人未抓到该用户UID。请让他先在群里发句话，或者直接回复他任意一条消息发送 `设置操作人` 即可成功绑定！")
         return
 
     # 6. 群组指令：语言切换
@@ -871,7 +851,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await show_full_bill(update, gid)
         return
 
-    # 下发记账 (支持: 备注下发50 / ထုတ်50)
     m_exp = re.match(r'^(.*?)(?:下发|ထုတ်)\s*(-?\d+(?:\.\d+)?)$', text)
     if m_exp:
         rem = m_exp.group(1).strip()
@@ -880,7 +859,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await show_full_bill(update, gid)
         return
 
-    # 入款/扣减记账 (支持: 备注+1000 / 备注-500 / 备注+2000/7.3)
     m_inc = re.match(r'^(.*?)([\+\-])(\d+(?:\.\d+)?)(?:/(\d+(?:\.\d+)?))?$', text)
     if m_inc:
         rem = m_inc.group(1).strip()
@@ -897,17 +875,15 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ==================== 异步服务启动器 ====================
 def main():
     init_db()
-    # 启动 Flask 网页监听线程
     threading.Thread(target=lambda: flask_app.run(host='0.0.0.0', port=PORT), daemon=True).start()
     
-    # 启动 Telegram 机器人主线程
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     
-    print("🤖 交付级商业分销版智能记账系统已全面加固启动...")
+    print("🤖 零管理权限依赖版——智能多群记账系统已加固部署...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
