@@ -14,7 +14,7 @@ import os
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = "8961723870:AAEM7urgrTIz_ZYljLj317YN5PHr5SJm_ew"
-WEB_URL = "https://xiaogenban-6688jk.onrender.com"
+WEB_URL = "https://xiaogenban-6688hgj.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
 FOUNDER_USERS = [8179896441]
