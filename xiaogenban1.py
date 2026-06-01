@@ -14,7 +14,7 @@ import os
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = "8961723870:AAHK1RoOHnhS9wVWmZ4DMYctZ0OlwtzWpKY"
-WEB_URL = "https://xiaogenban-668kk.onrender.com"
+WEB_URL = "https://xiaogenban-668ll.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
 FOUNDER_USERS = [8179896441]
@@ -714,7 +714,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(f"❌ <b>抱歉，本群的 1 天免费试用期已于 {expire_date_str} 强制定向截止！</b>\n\n请联系大老板或前往私聊点击 [自助续费] 完成多群独立授权面板。", parse_mode="HTML")
         return
 
-    # 📌 先获取基础环境数据，给记账提供时间基础
+    # 获取基础环境数据
     tz_str = get_setting(gid, 'timezone') or 'Asia/Shanghai'
     now, _, _ = get_current_time(tz_str)
     today_str = now.strftime("%Y-%m-%d")
@@ -730,6 +730,28 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         update_setting(gid, 'is_active', 0)
         await update.message.reply_text("🔴 <b>下课成功！今日账单已自动封存锁定归档。</b>", parse_mode="HTML")
         await send_text_bill_report(update, gid, today_str)
+        return
+
+    # ⭐【补回功能 1】：设置汇率
+    if text.startswith('设置汇率'):
+        if not can_use(gid, uid): return
+        try:
+            rate_val = float(text.replace('设置汇率', '').strip())
+            update_setting(gid, 'exchange_rate', rate_val)
+            await update.message.reply_text(f"💱 <b>汇率修改成功！当前群常规汇率已变更为：【{rate_val:.2f}】</b>", parse_mode="HTML")
+        except:
+            await update.message.reply_text("⚠️ 格式错误。示例：`设置汇率 7.25`")
+        return
+
+    # ⭐【补回功能 2】：设置费率
+    if text.startswith('设置费率'):
+        if not can_use(gid, uid): return
+        try:
+            fee_val = float(text.replace('设置费率', '').replace('%', '').strip())
+            update_setting(gid, 'fee_rate', fee_val)
+            await update.message.reply_text(f"📊 <b>费率修改成功！当前群计算手续费已变更为：【{fee_val:.1f}%】</b>", parse_mode="HTML")
+        except:
+            await update.message.reply_text("⚠️ 格式错误。示例：`设置费率 1.5%` 或 `设置费率 0`")
         return
 
     if text.startswith('设置操作人'):
@@ -855,11 +877,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     # ==================== 账目输入拦截流 ====================
-    # 📌 检查本群是否已经发送了“上课”激活
     if (get_setting(gid, 'is_active') or 0) == 0:
         return
         
-    # 📌 检查发话人是否有操作记账权限
     if not can_use(gid, uid): 
         return
 
@@ -867,14 +887,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await send_text_bill_report(update, gid, today_str)
         return
 
-    # 🛠️ 修复解析：下发/Thut 记账格式匹配器 (下发50 / 备注下发50)
     m_exp = re.match(r'^(.*?)(?:下发|ထုတ်)\s*(-?\d+(?:\.\d+)?)$', text)
     if m_exp:
         add_bill(gid, uid, username, m_exp.group(1).strip(), float(m_exp.group(2)), 'expense')
         await send_text_bill_report(update, gid, today_str)
         return
 
-    # 🛠️ 修复解析：经典加减入账格式匹配器 (+1000 / 备注+1000)
     m_inc = re.match(r'^(.*?)([\+\-])(\d+(?:\.\d+)?)(?:/(\d+(?:\.\d+)?))?$', text)
     if m_inc:
         rem = m_inc.group(1).strip()
