@@ -775,21 +775,107 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⚠️ <b>删除失败，无法在本地指引中反查到该用户名。</b>")
         return
 
-    # 切换群内系统语言（中文/缅甸语）
+    # 🛠️【核心新增功能 1】：支持“改语言”指令切换
     if text == '改语言':
         if not can_use(gid, uid): return
         current_lang = get_setting(gid, 'language') or 'chinese'
         new_lang = 'myanmar' if current_lang == 'chinese' else 'chinese'
         update_setting(gid, 'language', new_lang)
-        lang_tips = "🇲🇲 系统语言已切换为：缅甸语" if new_lang == 'myanmar' else "🇨🇳 系统语言已切换为：中文"
+        lang_tips = "🇲🇲 系统语言已切换为：缅甸语 (Myanmar)" if new_lang == 'myanmar' else "🇨🇳 系统语言已切换为：中文 (Chinese)"
         await update.message.reply_text(f"<b>{lang_tips}</b>", parse_mode="HTML")
         return
 
-    if (get_setting(gid, 'is_active') or 0) == 0 or not can_use(gid, uid): return
+    # 🛠️【核心新增功能 2】：支持“设置时间 china/myanmar”时区变更
+    if text.startswith('设置时间'):
+        if not can_use(gid, uid): return
+        arg = text.replace('设置时间', '').strip().lower()
+        if 'china' in arg or '中国' in arg:
+            update_setting(gid, 'timezone', 'Asia/Shanghai')
+            await update.message.reply_text("🇨🇳 <b>结算时区已变更为：北京时间 (Asia/Shanghai)</b>", parse_mode="HTML")
+        elif 'myanmar' in arg or '缅甸' in arg:
+            update_setting(gid, 'timezone', 'Asia/Yangon')
+            await update.message.reply_text("🇲🇲 <b>结算时区已变更为：缅甸仰光时间 (Asia/Yangon)</b>", parse_mode="HTML")
+        else:
+            await update.message.reply_text("⚠️ 格式错误。请使用：\n`设置时间 china` (北京时区)\n`设置时间 myanmar` (缅甸时区)", parse_mode="Markdown")
+        return
 
-    tz_str = get_setting(gid, 'timezone') or 'Asia/Shanghai'
-    now, _, _ = get_current_time(tz_str)
-    today_str = now.strftime("%Y-%m-%d")
+    # 🛠️【核心新增功能 3】：支持高级删除指令集（删今天 / 删最后 / 全部清单 / 清单+备注）
+    if text in ['删今天', '删最後']:
+        if not can_use(gid, uid): return
+        tz_str = get_setting(gid, 'timezone') or 'Asia/Shanghai'
+        now, _, _ = get_current_time(tz_str)
+        today_str = now.strftime("%Y-%m-%d")
+        
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("DELETE FROM bills WHERE group_id = ? AND date_str = ?", (gid, today_str))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text("🧹 <b>清空成功！今日记录的所有账单流水已被全部抹除。</b>", parse_mode="HTML")
+        await send_text_bill_report(update, gid, today_str)
+        return
+
+    if text == '删最后':
+        if not can_use(gid, uid): return
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT id, remark, amount, bill_type, date_str FROM bills WHERE group_id = ? ORDER BY id DESC LIMIT 1", (gid,))
+        row = c.fetchone()
+        if row:
+            b_id, b_rem, b_amt, b_type, b_date = row
+            c.execute("DELETE FROM bills WHERE id = ?", (b_id,))
+            conn.commit()
+            conn.close()
+            type_name = "入款" if b_type == 'income' else "下发"
+            amt_show = f"{b_amt:.0f}元" if b_type == 'income' else f"{b_amt:.1f}U"
+            rem_show = f"({b_rem})" if b_rem else ""
+            await update.message.reply_text(f"🗑️ <b>已成功撤销最后一笔账单：</b>\n流水号: {b_id} | {type_name}: {amt_show} {rem_show}", parse_mode="HTML")
+            await send_text_bill_report(update, gid, b_date)
+        else:
+            conn.close()
+            await update.message.reply_text("⚠️ <b>本群目前没有任何可以撤销的账单流水。</b>", parse_mode="HTML")
+        return
+
+    if text == '全部清单':
+        if not can_use(gid, uid): return
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("DELETE FROM bills WHERE group_id = ?", (gid,))
+        conn.commit()
+        conn.close()
+        tz_str = get_setting(gid, 'timezone') or 'Asia/Shanghai'
+        now, _, _ = get_current_time(tz_str)
+        await update.message.reply_text("🚨 <b>历史大扫除完成！本群在数据库中的历史所有账单已被彻底永久清空！</b>", parse_mode="HTML")
+        await send_text_bill_report(update, gid, now.strftime("%Y-%m-%d"))
+        return
+
+    if text.startswith('清单'):
+        if not can_use(gid, uid): return
+        # 兼容“清单+备注”和“清单 备注”格式
+        target_remark = text.replace('清单', '').replace('+', '').strip()
+        if not target_remark:
+            await update.message.reply_text("⚠️ <b>请输入具体的备注名称！例如：`清单张三` 或 `清单+李四`</b>", parse_mode="Markdown")
+            return
+        
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM bills WHERE group_id = ? AND remark = ?", (gid, target_remark))
+        count = c.fetchone()[0]
+        if count > 0:
+            c.execute("DELETE FROM bills WHERE group_id = ? AND remark = ?", (gid, target_remark))
+            conn.commit()
+            conn.close()
+            tz_str = get_setting(gid, 'timezone') or 'Asia/Shanghai'
+            now, _, _ = get_current_time(tz_str)
+            await update.message.reply_text(f"🔥 <b>成功清理！已永久删除备注为 [{target_remark}] 的全部账单流水（共计 {count} 笔）。</b>", parse_mode="HTML")
+            await send_text_bill_report(update, gid, now.strftime("%Y-%m-%d"))
+        else:
+            conn.close()
+            await update.message.reply_text(f"🔍 <b>未找到备注为 [{target_remark}] 的任何记账记录。</b>", parse_mode="HTML")
+        return
+
+    # --- 以下保持原有的普通加减记账解析流 ---
+    if (get_setting(gid, 'is_active') or 0) == 0 or not can_use(gid, uid): return
 
     if text == '+0':
         await send_text_bill_report(update, gid, today_str)
@@ -811,7 +897,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         add_bill(gid, uid, username, rem, amt, 'income', c_rate)
         await send_text_bill_report(update, gid, today_str)
         return
-
 # ==================== 买家上交截图审核网关 ====================
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private": return
