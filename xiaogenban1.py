@@ -13,8 +13,8 @@ import os
 # ==================== 系统基础配置 ====================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = "8961723870:AAHK1RoOHnhS9wVWmZ4DMYctZ0OlwtzWpKY"
-WEB_URL = "https://xiaogenban-668ll.onrender.com"
+TOKEN = "8961723870:AAEAbm6fOHLgw1PvhzgVtssmgJka22571eU"
+WEB_URL = "https://xiaogenban-666yk.onrender.com"
 PORT = int(os.environ.get('PORT', 8080))
 
 FOUNDER_USERS = [8179896441]
@@ -133,12 +133,27 @@ def is_vip_user(user_id):
     except: pass
     return False
 
-def check_group_validity(group_id):
+# 已修改：让群组有效期直接跟拉机器人进群的买家或操作人的VIP状态绑定
+def check_group_validity(group_id, user_id=None):
+    # 1. 如果当前发消息的人本身就是有效VIP/创始人，直接允许使用
+    if user_id and (is_master(user_id) or is_vip_user(user_id)):
+        return True, "VIP特权期"
+
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("SELECT expire_time FROM settings WHERE group_id = ?", (group_id,))
+    c.execute("SELECT operators, expire_time FROM settings WHERE group_id = ?", (group_id,))
     row = c.fetchone()
     
+    # 2. 如果群里有授权的操作人，检查操作人里有没有谁是有效VIP买家
+    if row:
+        try:
+            ops = json.loads(row[0] or '[]')
+            for op_id in ops:
+                if is_vip_user(op_id):
+                    conn.close()
+                    return True, "管理员VIP有效"
+        except: pass
+
     if not row:
         tz_str = 'Asia/Shanghai'
         _, _, trial_expire = get_current_time(tz_str)
@@ -150,7 +165,7 @@ def check_group_validity(group_id):
         return True, trial_expire
 
     conn.close()
-    group_expire_str = row[0]
+    group_expire_str = row[1]
     
     if group_expire_str:
         group_expire = datetime.strptime(group_expire_str, "%Y-%m-%d %H:%M:%S")
@@ -233,6 +248,7 @@ def get_class_bills_by_date(group_id, target_date):
     return income, expense, total_income, total_expense
 
 # ==================== 统一账目文本渲染引擎 ====================
+# 已修改：限制入款和下发流水部分只在群内文本显示最后的5笔
 async def send_text_bill_report(update, gid, target_date):
     rate = get_setting(gid, 'exchange_rate') or 7.2
     income, expense, total_income, total_expense = get_class_bills_by_date(gid, target_date)
@@ -244,9 +260,10 @@ async def send_text_bill_report(update, gid, target_date):
 
     report = f"📊 <b>账单汇总 ({target_date})</b>\n\n"
     
-    report += "📥 <b>入款:</b>\n"
+    report += "📥 <b>入款 (仅显示最后5笔):</b>\n"
     if income:
-        for row in income:
+        # 只取最后5笔
+        for row in income[-5:]:
             remark, username, amount, usdt_amount, ex_rate, timestamp = row
             time_str = timestamp[11:16] if timestamp else "00:00"
             rem_part = f" ({remark})" if remark else ""
@@ -255,8 +272,9 @@ async def send_text_bill_report(update, gid, target_date):
         report += "  暂无任何入款数据\n"
 
     if expense:
-        report += "\n📤 <b>下发:</b>\n"
-        for row in expense:
+        report += "\n📤 <b>下发 (仅显示最后5笔):</b>\n"
+        # 只取最后5笔
+        for row in expense[-5:]:
             remark, username, usdt_amount, ex_rate, timestamp = row
             time_str = timestamp[11:16] if timestamp else "00:00"
             rem_part = f" ({remark})" if remark else ""
@@ -708,10 +726,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     # --- 群组内核心业务逻辑 ---
-    is_valid, expire_date_str = check_group_validity(gid)
+    # 已修改：传入发消息的用户UID进行联合判定
+    is_valid, expire_date_str = check_group_validity(gid, uid)
     if not is_valid:
-        if is_master(uid) or is_vip_user(uid):
-            await update.message.reply_text(f"❌ <b>抱歉，本群的 1 天免费试用期已于 {expire_date_str} 强制定向截止！</b>\n\n请联系大老板或前往私聊点击 [自助续费] 完成多群独立授权面板。", parse_mode="HTML")
+        await update.message.reply_text(f"❌ <b>抱歉，本群的 1 天免费试用期已于 {expire_date_str} 强制定向截止！</b>\n\n请联系大老板或前往私聊点击 [自助续费] 完成多群独立授权面板。", parse_mode="HTML")
         return
 
     # 获取基础环境数据
@@ -732,7 +750,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await send_text_bill_report(update, gid, today_str)
         return
 
-    # ⭐【补回功能 1】：设置汇率
     if text.startswith('设置汇率'):
         if not can_use(gid, uid): return
         try:
@@ -743,7 +760,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⚠️ 格式错误。示例：`设置汇率 7.25`")
         return
 
-    # ⭐【补回功能 2】：设置费率
     if text.startswith('设置费率'):
         if not can_use(gid, uid): return
         try:
